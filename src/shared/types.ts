@@ -125,7 +125,9 @@ export interface ImageDataMessage {
     tiles: Array<{ dataUrl: string; x: number; y: number; width: number; height: number }>;
     width: number;
     height: number;
-    format: ImageFormat;
+    /** Sandbox only knows how to emit Figma-native formats. UI transcodes the
+     *  composited result into the user's chosen ImageFormat afterwards. */
+    format: SandboxImageFormat;
     scale: number;
   };
 }
@@ -139,13 +141,21 @@ export type ExportMode = 'per-image' | 'merged';
  *  Empty string means "fall back to auto-generated name". */
 export type ImageNameOverrides = Record<string, string>;
 
-export type ImageFormat = 'PNG' | 'JPG' | 'SVG';
+export type ImageFormat = 'PNG' | 'JPG' | 'SVG' | 'WEBP' | 'AVIF';
+
+/** Subset of ImageFormat that Figma's exportAsync can produce natively.
+ *  UI translates any JPG/WEBP/AVIF target to PNG at the sandbox boundary and
+ *  re-encodes client-side (via canvas.toBlob) so we can control quality and
+ *  support formats Figma doesn't understand. */
+export type SandboxImageFormat = 'PNG' | 'JPG' | 'SVG';
 
 /** Messages sent from UI → Sandbox */
 export interface ExportImagesMessage {
   type: 'export-images';
   scale: number;
-  format: ImageFormat;
+  /** Always a Figma-native format. UI is responsible for the translation so the
+   *  sandbox stays ignorant of WebP / AVIF and of quality knobs. */
+  format: SandboxImageFormat;
   mode: ExportMode;
 }
 

@@ -28,8 +28,15 @@ const MODE_OPTIONS = [
 const FORMAT_OPTIONS: { value: ImageFormat; label: string }[] = [
   { value: 'PNG', label: 'PNG' },
   { value: 'JPG', label: 'JPG' },
+  { value: 'WEBP', label: 'WebP' },
+  { value: 'AVIF', label: 'AVIF' },
   { value: 'SVG', label: 'SVG' },
 ];
+
+/** Formats that go through canvas.toBlob (have a `quality` knob). Matches the
+ *  `isLossy` predicate in transcode.ts — duplicated here to keep the component
+ *  self-contained for rendering decisions. */
+const LOSSY_FORMATS = new Set<ImageFormat>(['JPG', 'WEBP', 'AVIF']);
 
 const SCALE_OPTIONS = [
   { value: '0', label: 'Orig' },
@@ -115,6 +122,66 @@ function PreviewArea({ state, assets }: { state: State; assets: ImageAsset[] }) 
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── QualityRow ──────────────────────────────────────────
+interface QualityRowProps {
+  quality: number;
+  onChange: (value: number) => void;
+}
+
+/** Handy compression presets. Each maps to a `canvas.toBlob` quality value —
+ *  the usual "small / balanced / recommended / max" spread for lossy images. */
+const QUALITY_PRESETS = [0.6, 0.75, 0.9, 1];
+
+/** Slider + preset chips for lossy-format encode quality.
+ *  - Chips: one-click common values (60 / 75 / 90 / 100 %).
+ *  - Slider: fine-grained 30–100 % for pixel-peeping.
+ *  Every change dispatches QUALITY_CHANGED; the transcode effect in App.tsx
+ *  races its own generations so only the last value wins during a drag. */
+function QualityRow({ quality, onChange }: QualityRowProps) {
+  function handleInput(e: JSX.TargetedEvent<HTMLInputElement>) {
+    const v = Number(e.currentTarget.value);
+    if (!Number.isFinite(v)) return;
+    onChange(v);
+  }
+  const pct = Math.round(quality * 100);
+  // Preset active only when the slider is close enough — tolerance avoids
+  // flicker when the user stops mid-drag near a preset value.
+  const activePreset = QUALITY_PRESETS.find((p) => Math.abs(p - quality) < 0.025);
+  return (
+    <div class="quality-row">
+      <div class="quality-row-line">
+        <span class="quality-label">Quality</span>
+        <div class="quality-presets" role="group" aria-label="Quality presets">
+          {QUALITY_PRESETS.map((p) => {
+            const active = p === activePreset;
+            return (
+              <button
+                type="button"
+                class={active ? 'quality-preset active' : 'quality-preset'}
+                aria-pressed={active}
+                onClick={() => onChange(p)}
+              >
+                {Math.round(p * 100)}
+              </button>
+            );
+          })}
+        </div>
+        <span class="quality-value" aria-live="polite">{pct}%</span>
+      </div>
+      <input
+        type="range"
+        class="quality-slider"
+        min="0.3"
+        max="1"
+        step="0.01"
+        value={quality}
+        aria-label="Encode quality"
+        onInput={handleInput}
+      />
     </div>
   );
 }
@@ -396,10 +463,13 @@ export function ExportCard({ state, dispatch }: Props) {
 
   if (!state.data) return null;
 
-  // "Orig" disabled in merged or non-PNG (mirrors reconcileScale in state.ts).
-  const origForbidden = state.mode === 'merged' || state.format !== 'PNG';
+  // "Orig" disabled in merged or SVG (mirrors reconcileScale in state.ts). JPG /
+  // WebP / AVIF CAN use Orig now because the sandbox still delivers a PNG
+  // raster via getImageByHash and the UI transcodes it client-side.
+  const origForbidden = state.mode === 'merged' || state.format === 'SVG';
   const scaleOptions = SCALE_OPTIONS.map((o) => ({ ...o, disabled: o.value === '0' && origForbidden }));
   const modeOptions = MODE_OPTIONS.map((o) => ({ ...o, disabled: o.value === 'per-image' && assets.length === 0 }));
+  const showQuality = LOSSY_FORMATS.has(state.format);
 
   const namesToggleText = state.mode === 'merged'
     ? 'Rename file'
@@ -436,6 +506,15 @@ export function ExportCard({ state, dispatch }: Props) {
           onChange={(v) => dispatch({ type: 'FORMAT_CHANGED', format: v })}
         />
       </div>
+
+      {/* Quality slider only surfaces for lossy formats. Hidden (not disabled)
+          when irrelevant so the card stays compact for PNG / SVG flows. */}
+      {showQuality && (
+        <QualityRow
+          quality={state.quality}
+          onChange={(v) => dispatch({ type: 'QUALITY_CHANGED', value: v })}
+        />
+      )}
 
       {/* Re-key on selection so a new frame starts collapsed (matches user expectation). */}
       <details key={state.data.id} class="names-row">

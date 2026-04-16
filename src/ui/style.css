@@ -305,6 +305,120 @@ body {
   border-radius: 1px;
 }
 
+/* ── Quality Row ──────────────────────────────────────── */
+/* Two-line layout: preset chips + live percent on top, fine slider underneath.
+   Only rendered for lossy formats so PNG / SVG flows stay compact. */
+.quality-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+}
+
+.quality-row-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.quality-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.quality-presets {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.quality-preset {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1.5px solid var(--border);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--muted-fg);
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.quality-preset:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.quality-preset.active {
+  background: var(--accent);
+  border-color: var(--fg);
+  color: var(--accent-fg);
+}
+
+.quality-value {
+  font-family: ui-monospace, 'SF Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg);
+  min-width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Native range styling that matches the candy-pill aesthetic — thick track,
+   bold thumb with a hard offset shadow, wobble disabled to keep it usable. */
+.quality-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--border);
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+
+.quality-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--accent);
+  border: 2px solid var(--fg);
+  box-shadow: 2px 2px 0 var(--fg);
+  cursor: pointer;
+  transition: transform 120ms var(--bounce);
+}
+
+.quality-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--accent);
+  border: 2px solid var(--fg);
+  box-shadow: 2px 2px 0 var(--fg);
+  cursor: pointer;
+}
+
+.quality-slider:active::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+
+.quality-slider:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ── Segmented Control (binary choice) ────────────────── */
 .segmented {
   display: flex;

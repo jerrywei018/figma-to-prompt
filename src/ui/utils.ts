@@ -34,14 +34,29 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   return execCopy(text);
 }
 
-/** scale=0 uses getImageByHash → always PNG. Other scales honor format selection. */
-export function perImageExt(scale: number, format: ImageFormat): string {
-  return scale === 0 ? 'png' : format.toLowerCase();
+/** scale=0 pulls the original PNG raster via getImageByHash, then we transcode
+ *  client-side when the user picks a lossy target. The file extension always
+ *  reflects the user's chosen format — the raster source is an implementation
+ *  detail of the pipeline. SVG never enters this path (its own reconcile
+ *  rule bumps scale away from 0). */
+export function perImageExt(_scale: number, format: ImageFormat): string {
+  return formatExt(format);
 }
 
 /** ext used in merged-mode download (no `getImageByHash` path → format always honored) */
 export function mergedExt(format: ImageFormat): string {
-  return format === 'JPG' ? 'jpg' : format === 'SVG' ? 'svg' : 'png';
+  return formatExt(format);
+}
+
+/** Lower-cased file extension (no dot) for an output format. */
+function formatExt(format: ImageFormat): string {
+  switch (format) {
+    case 'JPG': return 'jpg';
+    case 'SVG': return 'svg';
+    case 'WEBP': return 'webp';
+    case 'AVIF': return 'avif';
+    default: return 'png';
+  }
 }
 
 /**

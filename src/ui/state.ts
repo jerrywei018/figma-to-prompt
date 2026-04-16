@@ -3,13 +3,29 @@ import type { ExportMode, ImageFormat, ImageNameOverrides, UISerializedNode } fr
 
 export type Tab = 'json' | 'prompt';
 
+/** Default canvas.toBlob quality. 0.92 is the browser's native default and
+ *  keeps JPG output roughly on par with Figma's own encoder; users can slide
+ *  down toward 0.3 for smaller files. */
+export const DEFAULT_QUALITY = 0.92;
+
 export interface State {
   data: UISerializedNode | null;
   tab: Tab;
+  /** Final, display-ready images (possibly transcoded). What PreviewArea and
+   *  the downloader actually consume. */
   images: Record<string, string>;
   mergedImage: string | null;
+  /** Raw sandbox output kept around so quality / format tweaks can re-transcode
+   *  without a sandbox round-trip. For PNG / SVG targets this equals `images` /
+   *  `mergedImage`; for lossy targets it holds the PNG source the transcode
+   *  pipeline reads from. */
+  rawImages: Record<string, string>;
+  rawMerged: string | null;
   scale: number; // 0 = original (getImageByHash), 1..4 = px multiplier
   format: ImageFormat;
+  /** canvas.toBlob quality for lossy formats (JPG / WEBP / AVIF). Ignored for
+   *  PNG and SVG. Kept in state across format swaps so the slider sticks. */
+  quality: number;
   mode: ExportMode;
   nameOverrides: ImageNameOverrides;
   mergedImageName: string;
@@ -24,8 +40,11 @@ export const initialState: State = {
   tab: 'json',
   images: {},
   mergedImage: null,
+  rawImages: {},
+  rawMerged: null,
   scale: 0,
   format: 'PNG',
+  quality: DEFAULT_QUALITY,
   mode: 'per-image',
   nameOverrides: {},
   mergedImageName: '',
@@ -37,22 +56,43 @@ export const initialState: State = {
 export type Action =
   | { type: 'SELECTION_EMPTY' }
   | { type: 'SELECTION_RECEIVED'; data: UISerializedNode }
-  | { type: 'IMAGES_RECEIVED'; images: Record<string, string>; merged?: string }
+  /** Sandbox delivered fresh PNG / SVG source data. Transcode effect will
+   *  consume this and produce IMAGES_RECEIVED with user-format output. */
+  | { type: 'RAW_IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
+  /** Final transcoded (or passthrough) images ready for preview / download. */
+  | { type: 'IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
   | { type: 'TAB_CHANGED'; tab: Tab }
   | { type: 'MODE_CHANGED'; mode: ExportMode }
   | { type: 'SCALE_CHANGED'; scale: number }
   | { type: 'FORMAT_CHANGED'; format: ImageFormat }
+  | { type: 'QUALITY_CHANGED'; value: number }
   | { type: 'NAME_OVERRIDE_CHANGED'; id: string; value: string }
   | { type: 'MERGED_NAME_CHANGED'; value: string }
   | { type: 'PROTOCOL_MISMATCH' }
   | { type: 'UPDATE_AVAILABLE'; version: string; url: string };
 
-/** Mirrors the original `reconcileScaleAvailability`:
- *  Orig (scale=0) only makes sense in per-image PNG mode. Anywhere else it would
- *  silently fall back to 1×, so we visibly bump it. */
+/** Orig (scale=0) pulls the uploaded raster via getImageByHash — always a PNG
+ *  single image. That's compatible with any raster target (we transcode PNG
+ *  client-side), but meaningless for merged exports (need exportAsync) and SVG
+ *  (no raster source). Previous rule forbade Orig for any non-PNG target; now
+ *  relaxed because JPG / WEBP / AVIF are client-transcoded from the PNG raster. */
 function reconcileScale(scale: number, mode: ExportMode, format: ImageFormat): number {
-  const origForbidden = mode === 'merged' || format !== 'PNG';
+  const origForbidden = mode === 'merged' || format === 'SVG';
   return origForbidden && scale === 0 ? 1 : scale;
+}
+
+/** Sandbox re-export is only required when the Figma-native format actually
+ *  changes (SVG vs raster). Swapping between raster output targets is a
+ *  client-side re-transcode, so we keep the existing rawImages. */
+function needsSandboxRefetch(prev: ImageFormat, next: ImageFormat): boolean {
+  return (prev === 'SVG') !== (next === 'SVG');
+}
+
+function clampQuality(v: number): number {
+  if (!Number.isFinite(v)) return DEFAULT_QUALITY;
+  if (v < 0.1) return 0.1;
+  if (v > 1) return 1;
+  return v;
 }
 
 export function reducer(state: State, action: Action): State {
@@ -86,6 +126,8 @@ export function reducer(state: State, action: Action): State {
         data,
         images: {},
         mergedImage: null,
+        rawImages: {},
+        rawMerged: null,
         nameOverrides: {},
         mergedImageName: '',
         mode,
@@ -93,6 +135,12 @@ export function reducer(state: State, action: Action): State {
         exportRequestId: needsRequest ? state.exportRequestId + 1 : state.exportRequestId,
       };
     }
+
+    case 'RAW_IMAGES_RECEIVED':
+      // Sandbox delivered the Figma-native source. The transcode effect in
+      // App.tsx watches rawImages / rawMerged / format / quality and writes
+      // the final display-ready output back via IMAGES_RECEIVED.
+      return { ...state, rawImages: action.images, rawMerged: action.merged ?? null };
 
     case 'IMAGES_RECEIVED':
       return { ...state, images: action.images, mergedImage: action.merged ?? null };
@@ -127,13 +175,24 @@ export function reducer(state: State, action: Action): State {
     case 'FORMAT_CHANGED': {
       const format = action.format;
       const scale = reconcileScale(state.scale, state.mode, format);
+      // Raster → raster swaps (PNG ↔ JPG ↔ WEBP ↔ AVIF) reuse the existing
+      // PNG raw data and only require a client-side re-transcode. The
+      // transcode effect in App.tsx is driven by `format`, so merely updating
+      // state here is enough — no sandbox round-trip.
+      const refetch = needsSandboxRefetch(state.format, format);
       return {
         ...state,
         format,
         scale,
-        exportRequestId: state.data ? state.exportRequestId + 1 : state.exportRequestId,
+        exportRequestId:
+          refetch && state.data ? state.exportRequestId + 1 : state.exportRequestId,
       };
     }
+
+    case 'QUALITY_CHANGED':
+      // Quality only affects the client-side transcode step, so no sandbox
+      // re-export — the effect picks up the new value from state and reruns.
+      return { ...state, quality: clampQuality(action.value) };
 
     case 'NAME_OVERRIDE_CHANGED': {
       const overrides = { ...state.nameOverrides };
