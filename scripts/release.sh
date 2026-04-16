@@ -63,6 +63,11 @@ node -e "
   fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 "
 
+# Rebuild so local dist/ matches the new version (CI=true → clean version, no -dev suffix)
+echo ""
+echo "Building..."
+CI=true pnpm build
+
 # Commit and tag
 git add package.json
 git commit -m "release: v${NEW_VERSION}"
