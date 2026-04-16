@@ -163,15 +163,10 @@ body {
 .actions-bar {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding: 10px 12px;
   border-top: 2px solid var(--border);
   flex-shrink: 0;
-}
-
-.download-row {
-  display: flex;
-  gap: 8px;
 }
 
 /* ── Primary Button ("Candy Button") ──────────────────── */
@@ -217,85 +212,234 @@ body {
   background: #EF4444;
 }
 
-/* ── Secondary Button ─────────────────────────────────── */
-.btn-secondary {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  padding: 6px 10px;
-  background: var(--card);
-  color: var(--fg);
-  font-family: var(--font-body);
-  font-weight: 600;
-  font-size: 11px;
-  border: 2px solid var(--fg);
-  border-radius: 9999px;
-  cursor: pointer;
-  transition: all 200ms var(--bounce);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--tertiary);
-  transform: translate(-1px, -1px);
+/* Smaller candy variant for card-internal CTA (still pill-shaped, a tier below
+   the top-level Copy CTA) */
+.btn-candy-sm {
+  padding: 6px 14px;
+  font-size: 12px;
   box-shadow: 2px 2px 0 var(--fg);
 }
 
-.btn-secondary:active:not(:disabled) {
-  transform: translate(1px, 1px);
-  box-shadow: none;
-  background: var(--tertiary);
+.btn-candy-sm:hover:not(:disabled) {
+  box-shadow: 3px 3px 0 var(--fg);
 }
 
-.btn-secondary:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-  border-color: var(--border);
-  color: var(--muted-fg);
-  background: transparent;
-}
-
-.btn-secondary.saved {
+.btn-candy-sm.saved {
   background: var(--quaternary);
-  color: var(--fg);
-  border-color: var(--fg);
 }
 
-/* ── Export Row ────────────────────────────────────────── */
-.export-row {
+/* ── Export Card ──────────────────────────────────────── */
+/* All image-export controls live in one visual container so the user sees
+   them as a single feature with its own CTA — not a soup of toolbar bits. */
+.export-card {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: center;
+  padding: 8px 10px 10px;
+  background: var(--card);
+  border: 2px solid var(--fg);
+  border-radius: 14px;
+  box-shadow: 3px 3px 0 var(--border);
 }
 
-.export-label {
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Combined Size + Format row: two chip-groups share space by chip count
+   so chip widths stay similar across both groups. */
+.option-row-combined #group-scale { flex: 5; }
+.option-row-combined #group-format { flex: 3; }
+
+.chip-divider {
+  width: 2px;
+  height: 18px;
+  background: var(--border);
+  flex-shrink: 0;
+  border-radius: 1px;
+}
+
+/* ── Segmented Control (binary choice) ────────────────── */
+.segmented {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  background: var(--muted);
+  border: 2px solid var(--fg);
+  border-radius: 9999px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.segment {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-family: var(--font-body);
   font-size: 11px;
   font-weight: 600;
   color: var(--muted-fg);
-  flex-shrink: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-/* ── Select ───────────────────────────────────────────── */
-.geo-select {
-  flex: 1;
-  padding: 4px 8px;
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--fg);
-  border: 2px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
+  background: transparent;
+  border: none;
+  border-radius: 9999px;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: background 180ms var(--bounce), color 180ms var(--bounce);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.geo-select:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 3px 3px 0 var(--accent);
+.segment:hover:not(.selected):not(:disabled) {
+  color: var(--fg);
+}
+
+.segment.selected {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.segment:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Chip Row (3-5 options) ───────────────────────────── */
+.chip-row {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+}
+
+.chip {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 4px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-fg);
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 150ms var(--bounce);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip:hover:not(.selected):not(:disabled) {
+  border-color: var(--fg);
+  color: var(--fg);
+}
+
+.chip.selected {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--fg);
+}
+
+.chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: var(--border);
+}
+
+/* ── Preview Area ─────────────────────────────────────── */
+/* Checkerboard background so transparent PNGs don't disappear into the card */
+.preview-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  max-height: 128px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: #FFFFFF;
+  background-image:
+    linear-gradient(45deg, #F1F5F9 25%, transparent 25%),
+    linear-gradient(-45deg, #F1F5F9 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #F1F5F9 75%),
+    linear-gradient(-45deg, transparent 75%, #F1F5F9 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+}
+
+.preview-merged {
+  max-width: 100%;
+  max-height: 124px;
+  object-fit: contain;
+  display: block;
+}
+
+/* Per-image: horizontal scroll strip of thumbnails */
+.preview-strip {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  scrollbar-width: thin;
+}
+
+.preview-thumb {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  background: var(--card);
+  border: 2px solid var(--fg);
+  border-radius: 8px;
+  box-shadow: 2px 2px 0 var(--border);
+  padding: 3px;
+}
+
+.preview-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-fg);
+  padding: 16px;
+  text-align: center;
+  user-select: none;
+}
+
+.preview-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-fg);
+}
+
+.preview-loading::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--tertiary);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.preview-strip::-webkit-scrollbar {
+  height: 6px;
+}
+.preview-strip::-webkit-scrollbar-track { background: transparent; }
+.preview-strip::-webkit-scrollbar-thumb {
+  background: rgba(139, 92, 246, 0.25);
+  border-radius: 3px;
 }
 
 /* ── Image Names ──────────────────────────────────────── */
@@ -314,6 +458,9 @@ body {
   letter-spacing: 0.05em;
   list-style: none;
   user-select: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .names-toggle::-webkit-details-marker {
@@ -351,9 +498,16 @@ body {
   white-space: nowrap;
 }
 
+.name-input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
 .name-input {
   flex: 1;
-  padding: 3px 6px;
+  padding: 3px 22px 3px 6px; /* right padding for the × reset button */
   font-family: var(--font-body);
   font-size: 11px;
   color: var(--fg);
@@ -363,10 +517,49 @@ body {
   min-width: 0;
 }
 
+/* Placeholder is the auto-generated default — italic + weaker opacity
+   signals "this is a suggestion, not a current value". */
+.name-input::placeholder {
+  color: var(--muted-fg);
+  font-style: italic;
+  opacity: 0.7;
+}
+
 .name-input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 2px 2px 0 var(--accent);
+}
+
+.name-reset {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--muted-fg);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.name-reset:hover {
+  color: var(--fg);
+  background: var(--border);
+}
+
+.name-reset[hidden] {
+  display: none;
 }
 
 .name-ext {
@@ -469,14 +662,10 @@ body {
 /* ── Focus Rings (Keyboard Accessibility) ─────────────── */
 .tab-btn:focus-visible,
 .btn-candy:focus-visible,
-.btn-secondary:focus-visible {
+.segment:focus-visible,
+.chip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-.geo-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 /* ── Tab Crossfade ────────────────────────────────────── */

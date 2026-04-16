@@ -83,40 +83,52 @@
       >
         Copy JSON
       </button>
-      <div class="download-row">
-        <button id="btn-download-json" class="btn-secondary" disabled>
-          .json
+
+      <!-- Export card: contains preview + all image export options + its own CTA -->
+      <section id="export-card" class="export-card hidden" aria-label="Export image">
+        <!-- Preview -->
+        <div id="preview-area" class="preview-area" aria-live="polite">
+          <div class="preview-placeholder">Waiting for selection…</div>
+        </div>
+
+        <!-- Output mode: 2-option segmented control (kept on its own row — it's the
+             fundamental mode choice and shouldn't share visual weight with raster options) -->
+        <div id="group-mode" class="segmented" role="radiogroup" aria-label="Output mode">
+          <button class="segment selected" type="button" role="radio" aria-checked="true" data-value="per-image">Each image</button>
+          <button class="segment" type="button" role="radio" aria-checked="false" data-value="merged">Whole frame</button>
+        </div>
+
+        <!-- Size + Format combined on one row. Chip values (1× / PNG) are self-evident
+             so we drop textual labels to save vertical space. A 2px divider keeps the
+             two groups visually distinct. flex: 5 / 3 weights the space so chips across
+             the two groups end up with similar widths. -->
+        <div class="option-row option-row-combined">
+          <div id="group-scale" class="chip-row" role="radiogroup" aria-label="Size">
+            <button class="chip selected" type="button" role="radio" aria-checked="true" data-value="0">Orig</button>
+            <button class="chip" type="button" role="radio" aria-checked="false" data-value="1">1×</button>
+            <button class="chip" type="button" role="radio" aria-checked="false" data-value="2">2×</button>
+            <button class="chip" type="button" role="radio" aria-checked="false" data-value="3">3×</button>
+            <button class="chip" type="button" role="radio" aria-checked="false" data-value="4">4×</button>
+          </div>
+          <span class="chip-divider" aria-hidden="true"></span>
+          <div id="group-format" class="chip-row" role="radiogroup" aria-label="Format">
+            <button class="chip selected" type="button" role="radio" aria-checked="true" data-value="PNG">PNG</button>
+            <button class="chip" type="button" role="radio" aria-checked="false" data-value="JPG">JPG</button>
+            <button class="chip" type="button" role="radio" aria-checked="false" data-value="SVG">SVG</button>
+          </div>
+        </div>
+
+        <!-- Rename (optional, collapsed by default) -->
+        <details id="names-row" class="names-row">
+          <summary class="names-toggle"><span id="names-toggle-text">Rename</span></summary>
+          <div id="names-list" class="names-list"></div>
+        </details>
+
+        <!-- Card's own CTA -->
+        <button id="btn-download-images" class="btn-candy btn-candy-sm" disabled>
+          Download image
         </button>
-        <button id="btn-download-md" class="btn-secondary" disabled>
-          .md
-        </button>
-        <button id="btn-download-images" class="btn-secondary" disabled>
-          Images
-        </button>
-      </div>
-      <div id="export-row" class="export-row hidden">
-        <span class="export-label">Export</span>
-        <select id="select-mode" class="geo-select" title="Per-image: each image fill as a separate file. Merged: whole selection rendered as one composite image (like Figma's native Export).">
-          <option value="per-image" selected>Per-image</option>
-          <option value="merged">Merged</option>
-        </select>
-        <select id="select-scale" class="geo-select">
-          <option value="0" selected>Original</option>
-          <option value="1">1x</option>
-          <option value="2">2x</option>
-          <option value="3">3x</option>
-          <option value="4">4x</option>
-        </select>
-        <select id="select-format" class="geo-select">
-          <option value="PNG" selected>PNG</option>
-          <option value="JPG">JPG</option>
-          <option value="SVG">SVG</option>
-        </select>
-      </div>
-      <details id="names-row" class="names-row hidden">
-        <summary class="names-toggle">Image names</summary>
-        <div id="names-list" class="names-list"></div>
-      </details>
+      </section>
     </div>
 
     <!-- Protocol Mismatch Banner -->

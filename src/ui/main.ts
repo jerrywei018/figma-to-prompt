@@ -28,19 +28,69 @@ const contentPrompt = document.getElementById('content-prompt')!;
 const jsonOutput = document.getElementById('json-output')!;
 const promptOutput = document.getElementById('prompt-output')!;
 const btnCopyPrompt = document.getElementById('btn-copy-prompt') as HTMLButtonElement;
-const btnDownloadJson = document.getElementById('btn-download-json') as HTMLButtonElement;
-const btnDownloadMd = document.getElementById('btn-download-md') as HTMLButtonElement;
 const btnDownloadImages = document.getElementById('btn-download-images') as HTMLButtonElement;
-const selectMode = document.getElementById('select-mode') as HTMLSelectElement;
-const selectScale = document.getElementById('select-scale') as HTMLSelectElement;
-const selectFormat = document.getElementById('select-format') as HTMLSelectElement;
 const statusText = document.getElementById('status-text')!;
 const statusDot = document.getElementById('status-dot')!;
 const emptyJson = document.getElementById('empty-json')!;
 const emptyPrompt = document.getElementById('empty-prompt')!;
-const exportRow = document.getElementById('export-row')!;
-const namesRow = document.getElementById('names-row')!;
+const exportCard = document.getElementById('export-card')!;
+const previewArea = document.getElementById('preview-area')!;
+const namesRow = document.getElementById('names-row') as HTMLDetailsElement;
 const namesList = document.getElementById('names-list')!;
+const namesToggleText = document.getElementById('names-toggle-text')!;
+
+// ── Button Group abstraction (segmented + chip rows) ─────
+// Replaces native <select>: stateful radio-group of <button data-value="…">.
+// Keeps visual state (class) + a11y (aria-checked) + disabled in sync.
+interface ButtonGroup<T extends string> {
+  root: HTMLElement;
+  getValue(): T;
+  setValue(value: T): void;
+  setDisabled(value: T, disabled: boolean): void;
+  onChange(fn: (value: T) => void): void;
+}
+
+function makeGroup<T extends string>(rootId: string, initial: T): ButtonGroup<T> {
+  const root = document.getElementById(rootId)!;
+  const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-value]'));
+  let current: T = initial;
+  let listener: ((v: T) => void) | null = null;
+
+  function setValue(value: T): void {
+    current = value;
+    for (const b of buttons) {
+      const match = b.dataset.value === value;
+      b.classList.toggle('selected', match);
+      b.setAttribute('aria-checked', String(match));
+    }
+  }
+
+  for (const b of buttons) {
+    b.addEventListener('click', () => {
+      if (b.disabled) return;
+      const v = b.dataset.value as T;
+      if (v === current) return;
+      setValue(v);
+      listener?.(v);
+    });
+  }
+
+  setValue(initial);
+
+  return {
+    root,
+    getValue: () => current,
+    setValue,
+    setDisabled(value, disabled) {
+      for (const b of buttons) if (b.dataset.value === value) b.disabled = disabled;
+    },
+    onChange(fn) { listener = fn; },
+  };
+}
+
+const modeGroup = makeGroup<ExportMode>('group-mode', 'per-image');
+const scaleGroup = makeGroup<string>('group-scale', '0');
+const formatGroup = makeGroup<'PNG' | 'JPG' | 'SVG'>('group-format', 'PNG');
 
 function sendToSandbox(msg: UIMessage): void {
   parent.postMessage({ pluginMessage: msg }, '*');
@@ -79,7 +129,7 @@ function scheduleRebuild(): void {
   nameInputDebounce = setTimeout(rebuildPromptText, 80);
 }
 
-/** Build one input row (label + input + `.png`/ext hint) */
+/** Build one input row (label + input + reset-x + ext hint) */
 function makeNameRow(labelText: string, placeholder: string, value: string, onChange: (v: string) => void): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'name-row';
@@ -89,18 +139,41 @@ function makeNameRow(labelText: string, placeholder: string, value: string, onCh
   label.title = labelText;
   label.textContent = labelText;
 
+  const inputWrap = document.createElement('span');
+  inputWrap.className = 'name-input-wrap';
+
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'name-input';
   input.placeholder = placeholder;
   input.value = value;
   input.spellcheck = false;
+
+  // ×-reset clears the override and restores the default (shown via placeholder)
+  const resetBtn = document.createElement('button');
+  resetBtn.type = 'button';
+  resetBtn.className = 'name-reset';
+  resetBtn.textContent = '×';
+  resetBtn.title = 'Reset to default';
+  resetBtn.setAttribute('aria-label', 'Reset to default name');
+  resetBtn.hidden = input.value === '';
+  resetBtn.addEventListener('click', () => {
+    input.value = '';
+    resetBtn.hidden = true;
+    onChange('');
+    scheduleRebuild();
+    input.focus();
+  });
+
   input.addEventListener('input', () => {
     const sanitized = sanitizeName(input.value);
     if (sanitized !== input.value) input.value = sanitized;
+    resetBtn.hidden = input.value === '';
     onChange(sanitized);
     scheduleRebuild();
   });
+
+  inputWrap.append(input, resetBtn);
 
   const ext = document.createElement('span');
   ext.className = 'name-ext';
@@ -108,8 +181,17 @@ function makeNameRow(labelText: string, placeholder: string, value: string, onCh
     ? `.${currentFormat === 'JPG' ? 'jpg' : currentFormat === 'SVG' ? 'svg' : 'png'}`
     : `.${perImageExt()}`;
 
-  row.append(label, input, ext);
+  row.append(label, inputWrap, ext);
   return row;
+}
+
+/** Update the Rename summary text to tell the user *what* they'd be renaming. */
+function updateNamesToggleText(imageCount: number): void {
+  if (currentMode === 'merged') {
+    namesToggleText.textContent = 'Rename file';
+  } else {
+    namesToggleText.textContent = imageCount === 1 ? 'Rename 1 image' : `Rename ${imageCount} images`;
+  }
 }
 
 /** (Re)populate the names list for the current selection + mode */
@@ -120,7 +202,7 @@ function renderNameInputs(): void {
   if (currentMode === 'merged') {
     const placeholder = sanitizeName(currentData.name);
     namesList.append(
-      makeNameRow('(composite)', placeholder, mergedImageName, (v) => {
+      makeNameRow('Whole frame', placeholder, mergedImageName, (v) => {
         mergedImageName = v;
       }),
     );
@@ -169,43 +251,110 @@ function requestImageExport(): void {
   });
 }
 
-/** Scale=0 means "original raster via getImageByHash" — only valid for per-image mode.
- *  Auto-bump to 1x when switching to merged so the render has a sensible size. */
-function reconcileScaleForMode(): void {
-  if (currentMode === 'merged' && currentScale === 0) {
+/** Render the preview area based on current mode + image data.
+ *  - loading: show shimmer/placeholder while sandbox re-exports
+ *  - merged: single composite image, centered, contain
+ *  - per-image: horizontal strip of per-asset thumbnails (uses nodeId → dataURL) */
+function renderPreview(opts: { loading: boolean }): void {
+  previewArea.replaceChildren();
+
+  if (opts.loading) {
+    const el = document.createElement('div');
+    el.className = 'preview-loading';
+    el.textContent = 'Generating preview…';
+    previewArea.appendChild(el);
+    return;
+  }
+
+  if (!currentData) {
+    const el = document.createElement('div');
+    el.className = 'preview-placeholder';
+    el.textContent = 'Waiting for selection…';
+    previewArea.appendChild(el);
+    return;
+  }
+
+  if (currentMode === 'merged') {
+    if (!currentMergedImage) {
+      const el = document.createElement('div');
+      el.className = 'preview-placeholder';
+      el.textContent = 'No preview available';
+      previewArea.appendChild(el);
+      return;
+    }
+    const img = document.createElement('img');
+    img.className = 'preview-merged';
+    img.src = currentMergedImage;
+    img.alt = `Merged preview of ${currentData.name}`;
+    previewArea.appendChild(img);
+    return;
+  }
+
+  // per-image: strip of thumbs keyed by asset nodeId
+  const assets = collectImageAssets(currentData);
+  const strip = document.createElement('div');
+  strip.className = 'preview-strip';
+  for (const a of assets) {
+    const url = currentImages[a.nodeId];
+    if (!url) continue;
+    const img = document.createElement('img');
+    img.className = 'preview-thumb';
+    img.src = url;
+    img.alt = a.nodeName;
+    img.title = a.nodeName;
+    strip.appendChild(img);
+  }
+  if (strip.children.length === 0) {
+    const el = document.createElement('div');
+    el.className = 'preview-placeholder';
+    el.textContent = 'No images to export';
+    previewArea.appendChild(el);
+    return;
+  }
+  previewArea.appendChild(strip);
+}
+
+/** Keep the "Orig" scale chip disabled when it wouldn't apply:
+ *  - Merged mode always re-rasterizes → Orig has no meaning
+ *  - Non-PNG formats bypass getImageByHash → Orig silently becomes 1×, so we
+ *    visibly disable it instead of silent-bumping (makes cause→effect legible) */
+function reconcileScaleAvailability(): void {
+  const origForbidden = currentMode === 'merged' || currentFormat !== 'PNG';
+  scaleGroup.setDisabled('0', origForbidden);
+  if (origForbidden && currentScale === 0) {
     currentScale = 1;
-    selectScale.value = '1';
+    scaleGroup.setValue('1');
   }
 }
 
-/** Scale=0 (Original) always returns PNG via getImageByHash — JPG/SVG cannot be honored.
- *  If the user picks a non-PNG format, auto-bump to 1x so the format choice actually applies. */
-function reconcileScaleForFormat(): void {
-  if (currentScale === 0 && currentFormat !== 'PNG') {
-    currentScale = 1;
-    selectScale.value = '1';
-  }
-}
-
-selectMode.addEventListener('change', () => {
-  currentMode = selectMode.value as ExportMode;
-  reconcileScaleForMode();
+modeGroup.onChange((v) => {
+  currentMode = v;
+  reconcileScaleAvailability();
   renderNameInputs();
   rebuildPromptText();
-  if (currentData) requestImageExport();
+  if (currentData) {
+    renderPreview({ loading: true });
+    requestImageExport();
+  }
 });
 
-selectScale.addEventListener('change', () => {
-  currentScale = Number(selectScale.value);
+scaleGroup.onChange((v) => {
+  currentScale = Number(v);
   renderNameInputs(); // ext label depends on scale/format
-  if (currentData) requestImageExport();
+  if (currentData) {
+    renderPreview({ loading: true });
+    requestImageExport();
+  }
 });
 
-selectFormat.addEventListener('change', () => {
-  currentFormat = selectFormat.value as 'PNG' | 'JPG' | 'SVG';
-  reconcileScaleForFormat();
+formatGroup.onChange((v) => {
+  currentFormat = v;
+  reconcileScaleAvailability();
   renderNameInputs();
-  if (currentData) requestImageExport();
+  if (currentData) {
+    renderPreview({ loading: true });
+    requestImageExport();
+  }
 });
 
 // Tab switching — pill style with active class
@@ -232,29 +381,6 @@ function switchTab(tab: 'json' | 'prompt'): void {
 
 tabJson.addEventListener('click', () => switchTab('json'));
 tabPrompt.addEventListener('click', () => switchTab('prompt'));
-
-// Download helper
-function downloadFile(filename: string, content: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-btnDownloadJson.addEventListener('click', () => {
-  if (!currentData) return;
-  const safeName = currentData.name.replace(/[^a-zA-Z0-9-_]/g, '_');
-  downloadFile(`${safeName}.json`, currentJson, 'application/json');
-});
-
-btnDownloadMd.addEventListener('click', () => {
-  if (!currentData) return;
-  const safeName = currentData.name.replace(/[^a-zA-Z0-9-_]/g, '_');
-  downloadFile(`${safeName}.md`, currentPromptText, 'text/markdown');
-});
 
 function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
@@ -491,7 +617,6 @@ window.onmessage = (event: MessageEvent) => {
     imageNameOverrides = {};
     mergedImageName = '';
     namesList.replaceChildren();
-    namesRow.classList.add('hidden');
     // Show empty states, hide content
     jsonOutput.textContent = '';
     jsonOutput.classList.add('hidden');
@@ -499,12 +624,10 @@ window.onmessage = (event: MessageEvent) => {
     promptOutput.textContent = '';
     promptOutput.classList.add('hidden');
     emptyPrompt.classList.remove('hidden');
-    // Disable all actions
+    // Disable all actions; hide the whole export card (it has no meaning without a selection)
     btnCopyPrompt.disabled = true;
-    btnDownloadJson.disabled = true;
-    btnDownloadMd.disabled = true;
     btnDownloadImages.disabled = true;
-    exportRow.classList.add('hidden');
+    exportCard.classList.add('hidden');
     statusText.textContent = 'No selection';
     setStatusDot('idle');
     statusDot.classList.remove('loading');
@@ -538,30 +661,31 @@ window.onmessage = (event: MessageEvent) => {
     promptOutput.classList.remove('hidden');
 
     btnCopyPrompt.disabled = false;
-    btnDownloadJson.disabled = false;
-    btnDownloadMd.disabled = false;
     btnDownloadImages.disabled = true; // enabled when images arrive
 
     const imageCount = currentData ? collectImageAssets(currentData).length : 0;
-    // Export-row is useful for any exportable selection (Merged mode works even
-    // without image fills — e.g. a pure-vector icon frame). Only hide on empty selection.
-    exportRow.classList.remove('hidden');
+    // Export card is useful for any exportable selection — merged mode works even
+    // without image fills (e.g. a pure-vector icon frame).
+    exportCard.classList.remove('hidden');
 
-    // Per-image mode requires image fills; disable it (and force Merged) when there are none.
-    const perImageOption = selectMode.querySelector('option[value="per-image"]') as HTMLOptionElement | null;
-    if (perImageOption) perImageOption.disabled = imageCount === 0;
+    // Per-image mode requires image fills; disable that segment (and force Whole frame) when none.
+    modeGroup.setDisabled('per-image', imageCount === 0);
     if (imageCount === 0 && currentMode === 'per-image') {
       currentMode = 'merged';
-      selectMode.value = 'merged';
-      reconcileScaleForMode();
+      modeGroup.setValue('merged');
     }
+    reconcileScaleAvailability();
 
-    // names-row: shown in merged mode always (composite input) or per-image with fills
-    const showNames = currentMode === 'merged' || imageCount > 0;
-    namesRow.classList.toggle('hidden', !showNames);
-    if (showNames) renderNameInputs();
+    // Names: always renderable (Rename covers both modes). Close any previously-open details
+    // so the user doesn't carry the stale "Rename 3 images" open-state across selections.
+    namesRow.open = false;
+    renderNameInputs();
+    updateNamesToggleText(imageCount);
 
-    let status = `Selected: ${msg.data.name} (${msg.data.type}) — ${msg.meta.nodeCount} nodes`;
+    // Preview: show loading immediately, replaced when image-data arrives
+    renderPreview({ loading: true });
+
+    let status = `${msg.data.name} · ${msg.meta.nodeCount} nodes`;
     const willExport = currentMode === 'merged' || imageCount > 0;
     if (willExport) {
       status += currentMode === 'merged' ? ' · merged (loading…)' : ` · ${imageCount} images (loading…)`;
@@ -598,6 +722,7 @@ window.onmessage = (event: MessageEvent) => {
     }
     setStatusDot(loaded > 0 ? 'active' : 'error');
     statusDot.classList.remove('loading');
+    renderPreview({ loading: false });
     return;
   }
 };
