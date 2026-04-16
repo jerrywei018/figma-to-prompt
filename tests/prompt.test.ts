@@ -414,13 +414,16 @@ describe('image assets', () => {
       expect(prompt).not.toContain('`Hero_Section_Hero_Background.png`');
     });
 
-    it('includes merged composite line when merged option provided', () => {
+    it('in merged mode only lists composite, omits per-image fills to avoid misleading the AI', () => {
       const prompt = buildPrompt(nodeWithImage, {
         merged: { name: 'hero_frame', width: 1200, height: 800 },
       });
       expect(prompt).toContain('`hero_frame.png` → whole composite (1200×800)');
-      // Individual image lines still present
-      expect(prompt).toContain('`Hero_Section_Hero_Background.png`');
+      // Individual per-image fills must NOT appear — those files are not attached in merged mode
+      expect(prompt).not.toContain('Hero_Section_Hero_Background.png');
+      expect(prompt).not.toContain('Hero_Section_Profile_Avatar.png');
+      // Header should explicitly warn the AI not to reference individual image files
+      expect(prompt).toContain('Do NOT reference any individual image files');
     });
 
     it('adds Assets section for merged even when per-image list is empty', () => {

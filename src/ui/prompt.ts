@@ -407,23 +407,28 @@ export function buildPrompt(node: UISerializedNode, options?: BuildPromptOptions
   }
 
   // Image Assets
-  const imageAssets = collectImageAssets(node, options?.imageNameOverrides);
+  // Merged mode: only the composite is attached; individual image fills are already
+  // rasterized into it and MUST NOT be referenced as separate files (they don't exist
+  // as attachments). Per-image mode lists each image-fill node as its own asset.
   const merged = options?.merged;
-  if (imageAssets.length > 0 || merged) {
-    const assetLines: string[] = [];
-    if (merged) {
-      const mergedSafe = sanitizeFileName(merged.name);
-      assetLines.push(
-        `- \`${mergedSafe}.png\` → whole composite (${merged.width}×${merged.height}) — use as visual reference for the entire frame`,
+  if (merged) {
+    const mergedSafe = sanitizeFileName(merged.name);
+    sections.push(
+      `## Assets\nA single rendered composite image is attached — use it as a visual reference for the whole frame. Do NOT reference any individual image files; they are already baked into this composite:\n- \`${mergedSafe}.png\` → whole composite (${merged.width}×${merged.height})`,
+    );
+  } else {
+    const imageAssets = collectImageAssets(node, options?.imageNameOverrides);
+    if (imageAssets.length > 0) {
+      const assetLines = imageAssets.map((a) => {
+        let line = `- \`${a.fileName}\` → ${a.nodeName} (${a.width}×${a.height}`;
+        if (a.scaleMode) line += `, ${a.scaleMode}`;
+        line += ')';
+        return line;
+      });
+      sections.push(
+        `## Assets\nImage files included with this spec — use as \`<img>\` or CSS \`background-image\`:\n${assetLines.join('\n')}`,
       );
     }
-    for (const a of imageAssets) {
-      let line = `- \`${a.fileName}\` → ${a.nodeName} (${a.width}×${a.height}`;
-      if (a.scaleMode) line += `, ${a.scaleMode}`;
-      line += ')';
-      assetLines.push(line);
-    }
-    sections.push(`## Assets\nImage files included with this spec — use as \`<img>\` or CSS \`background-image\`:\n${assetLines.join('\n')}`);
   }
 
   // Component Structure (replaces separate Node Tree + Full JSON)
