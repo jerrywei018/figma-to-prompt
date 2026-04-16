@@ -1,10 +1,18 @@
-import { useMemo } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { Action, State } from '../state';
 import type { ExportMode, ImageFormat } from '../../shared/types';
 import { type ImageAsset, collectImageAssets, sanitizeFileName } from '../prompt';
 import { mergedExt, perImageExt, useDebouncedCallback, useFeedback } from '../utils';
 import { createZip, dataUrlToBlob, downloadBlob } from '../download';
+import {
+  type FsaDirectoryHandle,
+  ensurePermission,
+  isFsaSupported,
+  pickDirectory,
+  writeFileToDir,
+} from '../folder';
+import { loadDirHandle, saveDirHandle } from '../storage';
 import { ButtonGroup } from './ButtonGroup';
 
 interface Props {
@@ -196,8 +204,48 @@ function RenamesList({ state, assets, dispatch }: { state: State; assets: ImageA
   );
 }
 
+// ── FolderPickerRow ─────────────────────────────────────
+/**
+ * Shows the remembered download folder (or a "choose" prompt if none), with a
+ * link-styled button to open the native picker. Only renders when the File
+ * System Access API is available — otherwise the whole row is hidden and the
+ * DownloadButton silently falls back to `<a download>`.
+ */
+interface FolderPickerRowProps {
+  dir: FsaDirectoryHandle | null;
+  onPick: () => void;
+}
+
+function FolderPickerRow({ dir, onPick }: FolderPickerRowProps) {
+  return (
+    <div class="folder-picker-row">
+      <span class="folder-picker-icon" aria-hidden="true">📁</span>
+      {dir ? (
+        <>
+          <span class="folder-picker-name" title={dir.name}>
+            {dir.name}
+          </span>
+          <button type="button" class="folder-picker-change" onClick={onPick}>
+            Change
+          </button>
+        </>
+      ) : (
+        <button type="button" class="folder-picker-change" onClick={onPick}>
+          Choose download folder…
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── DownloadButton ──────────────────────────────────────
-function DownloadButton({ state }: { state: State }) {
+interface DownloadButtonProps {
+  state: State;
+  dirHandle: FsaDirectoryHandle | null;
+  fsaSupported: boolean;
+}
+
+function DownloadButton({ state, dirHandle, fsaSupported }: DownloadButtonProps) {
   const [feedback, flash] = useFeedback<number>();
 
   const loadedCount = state.mergedImage ? 1 : Object.keys(state.images).length;
@@ -206,36 +254,70 @@ function DownloadButton({ state }: { state: State }) {
   async function handleClick() {
     if (!state.data) return;
 
+    // 1. Build outputs. In merged mode: one composite file.
+    //    In per-image mode: individual files if writing to a chosen folder
+    //    (user picked a folder → they want files, not a zip), or the legacy
+    //    zip-or-single behavior for the browser-download fallback path.
+    const outputs: { name: string; blob: Blob }[] = [];
+    let feedbackCount = 0;
+
     if (state.mode === 'merged') {
       if (!state.mergedImage) return;
       const base = state.mergedImageName.trim() || sanitizeFileName(state.data.name);
-      downloadBlob(`${base}.${mergedExt(state.format)}`, dataUrlToBlob(state.mergedImage));
-      flash(1);
-      return;
-    }
-
-    if (Object.keys(state.images).length === 0) return;
-    // Re-collect with overrides applied so user-set filenames + collision suffixing kick in.
-    const namedAssets = collectImageAssets(state.data, state.nameOverrides);
-    const ext = perImageExt(state.scale, state.format);
-    const files: { name: string; data: Uint8Array }[] = [];
-
-    for (const asset of namedAssets) {
-      const dataUrl = state.images[asset.nodeId];
-      if (!dataUrl) continue;
-      const buffer = await dataUrlToBlob(dataUrl).arrayBuffer();
-      files.push({
-        name: asset.fileName.replace(/\.png$/, `.${ext}`),
-        data: new Uint8Array(buffer),
+      outputs.push({
+        name: `${base}.${mergedExt(state.format)}`,
+        blob: dataUrlToBlob(state.mergedImage),
       });
-    }
-    if (files.length === 0) return;
-    if (files.length === 1) {
-      downloadBlob(files[0].name, new Blob([files[0].data as BlobPart]));
+      feedbackCount = 1;
     } else {
-      downloadBlob(`${sanitizeFileName(state.data.name)}_images.zip`, createZip(files));
+      if (Object.keys(state.images).length === 0) return;
+      const namedAssets = collectImageAssets(state.data, state.nameOverrides);
+      const ext = perImageExt(state.scale, state.format);
+      const perFile: { name: string; data: Uint8Array }[] = [];
+
+      for (const asset of namedAssets) {
+        const dataUrl = state.images[asset.nodeId];
+        if (!dataUrl) continue;
+        const buffer = await dataUrlToBlob(dataUrl).arrayBuffer();
+        perFile.push({
+          name: asset.fileName.replace(/\.png$/, `.${ext}`),
+          data: new Uint8Array(buffer),
+        });
+      }
+      if (perFile.length === 0) return;
+      feedbackCount = perFile.length;
+
+      if (fsaSupported && dirHandle) {
+        // FSA path: one Blob per file, no zip wrapper.
+        for (const f of perFile) {
+          outputs.push({ name: f.name, blob: new Blob([f.data as BlobPart]) });
+        }
+      } else if (perFile.length === 1) {
+        outputs.push({ name: perFile[0].name, blob: new Blob([perFile[0].data as BlobPart]) });
+      } else {
+        // Fallback: bundle into one zip so the user only sees one download prompt.
+        outputs.push({
+          name: `${sanitizeFileName(state.data.name)}_images.zip`,
+          blob: createZip(perFile),
+        });
+      }
     }
-    flash(files.length);
+
+    // 2. Write. `ensurePermission` must be awaited inside this user-gesture
+    //    handler so the re-grant prompt (on a stale handle) is permitted.
+    const fsaReady = fsaSupported && !!dirHandle && (await ensurePermission(dirHandle));
+    if (fsaReady && dirHandle) {
+      try {
+        for (const o of outputs) await writeFileToDir(dirHandle, o.name, o.blob);
+      } catch {
+        // Mid-stream failure: fall back so the user still gets their files
+        // rather than losing whatever was queued.
+        for (const o of outputs) downloadBlob(o.name, o.blob);
+      }
+    } else {
+      for (const o of outputs) downloadBlob(o.name, o.blob);
+    }
+    flash(feedbackCount);
   }
 
   const label = feedback != null ? `${feedback} saved!` : 'Download image';
@@ -252,6 +334,29 @@ function DownloadButton({ state }: { state: State }) {
 export function ExportCard({ state, dispatch }: Props) {
   // One tree walk per selection, shared with PreviewArea / RenamesList / DownloadButton.
   const assets = useMemo(() => (state.data ? collectImageAssets(state.data) : []), [state.data]);
+
+  // Folder-picker state is local to this card — the reducer doesn't care where
+  // files land. `useMemo` pins the capability check (stable for the session).
+  const fsaSupported = useMemo(() => isFsaSupported(), []);
+  const [dirHandle, setDirHandle] = useState<FsaDirectoryHandle | null>(null);
+
+  useEffect(() => {
+    if (!fsaSupported) return;
+    let cancelled = false;
+    loadDirHandle<FsaDirectoryHandle>().then((h) => {
+      if (!cancelled) setDirHandle(h);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fsaSupported]);
+
+  async function handlePickDirectory() {
+    const h = await pickDirectory();
+    if (!h) return; // user cancelled or API blew up — keep whatever we had
+    await saveDirHandle(h);
+    setDirHandle(h);
+  }
 
   if (!state.data) return null;
 
@@ -306,7 +411,9 @@ export function ExportCard({ state, dispatch }: Props) {
         </div>
       </details>
 
-      <DownloadButton state={state} />
+      {fsaSupported && <FolderPickerRow dir={dirHandle} onPick={handlePickDirectory} />}
+
+      <DownloadButton state={state} dirHandle={dirHandle} fsaSupported={fsaSupported} />
     </section>
   );
 }

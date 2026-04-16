@@ -9,7 +9,7 @@ A Figma plugin that extracts design data into structured JSON and AI-ready markd
 - **JSON Export** — Get a full hierarchical JSON of any frame (layout, styles, typography, colors)
 - **AI Prompt** — Auto-generates a framework-agnostic markdown prompt with embedded JSON spec
 - **Copy to Clipboard** — One-click copy of the current tab content (JSON or Prompt)
-- **Download** — Save as `.json`, `.md`, or images
+- **Download** — Save as images
 - **Image Export** — PNG / JPG / SVG with 1x–4x scale options
 - **Real-time** — Updates instantly when you change your selection
 
