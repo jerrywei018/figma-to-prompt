@@ -3,8 +3,9 @@ import type { Tab } from '../state';
 
 interface Props {
   tab: Tab;
-  json: string;
-  promptText: string;
+  /** Pre-rendered active-tab text. Derived in App.tsx via useMemo so rapid
+   *  selection changes only compute whichever view is visible. */
+  text: string;
   hasData: boolean;
 }
 
@@ -48,8 +49,7 @@ function EmptyState({ tab }: { tab: Tab }) {
   );
 }
 
-export function CodePanel({ tab, json, promptText, hasData }: Props) {
-  const text = tab === 'json' ? json : promptText;
+export function CodePanel({ tab, text, hasData }: Props) {
   return (
     <div class="content-area">
       {/* `key={tab}` remounts on tab switch — fade animation needs a fresh DOM

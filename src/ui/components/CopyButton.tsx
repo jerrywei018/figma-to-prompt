@@ -3,15 +3,15 @@ import { copyToClipboard, useFeedback } from '../utils';
 
 interface Props {
   tab: Tab;
-  json: string;
-  promptText: string;
+  /** Active-tab text derived in App.tsx. Kept flat (single string) so this
+   *  component never holds references to data that might grow stale. */
+  text: string;
 }
 
 type Feedback = 'copied' | 'failed';
 
-export function CopyButton({ tab, json, promptText }: Props) {
+export function CopyButton({ tab, text }: Props) {
   const [feedback, flash] = useFeedback<Feedback>();
-  const text = tab === 'json' ? json : promptText;
 
   const baseLabel = tab === 'json' ? 'Copy JSON' : 'Copy Prompt';
   const label = feedback === 'copied' ? 'Copied!' : feedback === 'failed' ? 'Copy failed' : baseLabel;

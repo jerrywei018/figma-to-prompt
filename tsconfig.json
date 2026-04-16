@@ -1,4 +1,9 @@
 {
+  // Root config doubles as (a) the base for tsconfig.ui.json / tsconfig.sandbox.json
+  // AND (b) the config used by `tsc --noEmit` at the repo root (our post-edit hook).
+  // To make the hook see BOTH the UI (Preact + DOM) and sandbox (Figma plugin)
+  // surfaces at once, we union their libs/types here. The per-target configs
+  // still exist because vite builds each output separately.
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
@@ -11,9 +16,17 @@
     "isolatedModules": true,
     "noEmit": true,
     "declaration": false,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    // @figma/plugin-typings is a scoped package (not under @types/…) so we rely
+    // on default type acquisition (do NOT set typeRoots here) and pull the
+    // global Figma API declarations explicitly.
+    "types": ["@figma/plugin-typings"],
     "paths": {
       "@shared/*": ["./src/shared/*"]
     }
   },
+  "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules", "dist"]
 }

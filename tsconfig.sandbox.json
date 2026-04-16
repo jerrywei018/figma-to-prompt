@@ -1,7 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "typeRoots": ["./node_modules/@types"],
+    // Base config already loads @figma/plugin-typings; re-declaring here would
+    // shadow any future type additions. Keep it empty-override so inheritance wins.
     "types": ["@figma/plugin-typings"]
   },
   "include": ["src/shared/**/*", "src/sandbox/**/*"]

@@ -1,5 +1,6 @@
-import { useEffect, useReducer } from 'preact/hooks';
+import { useEffect, useMemo, useReducer } from 'preact/hooks';
 import { initialState, reducer } from './state';
+import { buildPrompt, sanitizeFileName } from './prompt';
 import { PROTOCOL_VERSION } from '../shared/types';
 import type { ImageDataMessage, SandboxMessage, UIMessage } from '../shared/types';
 import { Header } from './components/Header';
@@ -154,18 +155,44 @@ export function App() {
     };
   }, []);
 
+  // Lazy-derive the active tab's text so rapid frame switching only pays for
+  // whichever view is visible. Previously the reducer computed JSON.stringify
+  // AND buildPrompt on every SELECTION_RECEIVED, thrashing the main thread.
+  // useMemo caches across re-renders that don't touch these deps (e.g. image
+  // arrivals, export-setting toggles).
+  const text = useMemo(() => {
+    if (!state.data) return '';
+    if (state.tab === 'json') return JSON.stringify(state.data, null, 2);
+    const merged = state.mode === 'merged' && state.data.layout
+      ? {
+          name: state.mergedImageName.trim() || sanitizeFileName(state.data.name),
+          width: Math.round(state.data.layout.width),
+          height: Math.round(state.data.layout.height),
+        }
+      : undefined;
+    return buildPrompt(state.data, {
+      imageNameOverrides: state.nameOverrides,
+      merged,
+    });
+  }, [
+    state.tab,
+    state.data,
+    state.mode,
+    state.nameOverrides,
+    state.mergedImageName,
+  ]);
+
   return (
     <>
       <Header />
       <TabBar tab={state.tab} onChange={(t) => dispatch({ type: 'TAB_CHANGED', tab: t })} />
       <CodePanel
         tab={state.tab}
-        json={state.json}
-        promptText={state.promptText}
+        text={text}
         hasData={!!state.data}
       />
       <div class="actions-bar">
-        <CopyButton tab={state.tab} json={state.json} promptText={state.promptText} />
+        <CopyButton tab={state.tab} text={text} />
         <ExportCard state={state} dispatch={dispatch} />
       </div>
       <Banners protocolMismatch={state.protocolMismatch} updateAvailable={state.updateAvailable} />

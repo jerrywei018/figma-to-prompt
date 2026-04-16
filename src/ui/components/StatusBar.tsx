@@ -28,8 +28,16 @@ function deriveStatus(
   if (!state.data) return { text: 'No selection', dot: 'idle', loading: false };
 
   const willExport = state.mode === 'merged' || imageCount > 0;
-  const loadedCount = state.mergedImage ? 1 : Object.keys(state.images).length;
-  const stillLoading = willExport && loadedCount === 0;
+  // Mode-aware loading check. MODE_CHANGED / SCALE_CHANGED / FORMAT_CHANGED no
+  // longer wipe the opposite mode's data, so we must not count `images` when
+  // the user is now in merged mode (and vice versa) — otherwise the pulse
+  // would vanish while the new export is still in flight.
+  const hasCurrentModeData =
+    state.mode === 'merged' ? !!state.mergedImage : Object.keys(state.images).length > 0;
+  const loadedCount = hasCurrentModeData
+    ? (state.mode === 'merged' ? 1 : Object.keys(state.images).length)
+    : 0;
+  const stillLoading = willExport && !hasCurrentModeData;
 
   let suffix = '';
   let dot: DotState = willExport ? 'loading' : 'active';

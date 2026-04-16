@@ -140,6 +140,13 @@ body {
   line-height: 1.625;
   word-break: break-word;
   color: #E2E8F0;
+  /* Skip layout + paint for text that's scrolled out of view. For huge JSON /
+     prompt outputs on rapid frame switching, this cuts first-paint cost
+     dramatically — the browser only styles what's actually visible. The
+     intrinsic-size hint keeps the scrollbar from jumping while sections
+     come in and out of view. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 800px;
 }
 
 /* ── Empty State ──────────────────────────────────────── */
@@ -236,6 +243,32 @@ body {
 
 .btn-candy-sm.saved {
   background: var(--quaternary);
+}
+
+/* Saving state: button stays interactive-looking but shows a spinner alongside
+   the "Saving…" label so large downloads never feel frozen. Pointer events are
+   disabled via :disabled; we keep full opacity so the spinner is clearly visible. */
+.btn-candy.saving,
+.btn-candy-sm.saving {
+  background: var(--tertiary);
+  color: var(--accent-fg);
+  gap: 6px;
+}
+
+.btn-candy.saving:disabled,
+.btn-candy-sm.saving:disabled {
+  opacity: 1;
+  cursor: progress;
+  box-shadow: 2px 2px 0 var(--fg);
+}
+
+.btn-spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--accent-fg);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+  flex-shrink: 0;
 }
 
 /* ── Export Card ──────────────────────────────────────── */

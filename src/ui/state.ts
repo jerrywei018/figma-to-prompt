@@ -1,12 +1,10 @@
-import { buildPrompt, collectImageAssets, sanitizeFileName } from './prompt';
+import { collectImageAssets } from './prompt';
 import type { ExportMode, ImageFormat, ImageNameOverrides, UISerializedNode } from '../shared/types';
 
 export type Tab = 'json' | 'prompt';
 
 export interface State {
   data: UISerializedNode | null;
-  json: string;
-  promptText: string;
   tab: Tab;
   images: Record<string, string>;
   mergedImage: string | null;
@@ -23,8 +21,6 @@ export interface State {
 
 export const initialState: State = {
   data: null,
-  json: '',
-  promptText: '',
   tab: 'json',
   images: {},
   mergedImage: null,
@@ -59,23 +55,6 @@ function reconcileScale(scale: number, mode: ExportMode, format: ImageFormat): n
   return origForbidden && scale === 0 ? 1 : scale;
 }
 
-function computePrompt(
-  data: UISerializedNode | null,
-  mode: ExportMode,
-  overrides: ImageNameOverrides,
-  mergedName: string,
-): string {
-  if (!data) return '';
-  const merged = mode === 'merged' && data.layout
-    ? {
-        name: mergedName.trim() || sanitizeFileName(data.name),
-        width: Math.round(data.layout.width),
-        height: Math.round(data.layout.height),
-      }
-    : undefined;
-  return buildPrompt(data, { imageNameOverrides: overrides, merged });
-}
-
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'SELECTION_EMPTY':
@@ -92,20 +71,19 @@ export function reducer(state: State, action: Action): State {
 
     case 'SELECTION_RECEIVED': {
       const { data } = action;
-      const json = JSON.stringify(data, null, 2);
       const hasImages = collectImageAssets(data).length > 0;
       // Per-image mode is meaningless without image fills — force merged.
       const mode: ExportMode = !hasImages && state.mode === 'per-image' ? 'merged' : state.mode;
       const scale = reconcileScale(state.scale, mode, state.format);
-      const promptText = computePrompt(data, mode, {}, '');
       // Sandbox auto-triggers a per-image export on selection change. We only need to
       // re-request when our local mode is merged (or was just forced to merged).
       const needsRequest = mode === 'merged';
+      // JSON / prompt text are derived lazily by CodePanel via useMemo so rapid
+      // selection changes don't pay both JSON.stringify + buildPrompt eagerly
+      // on every click. Only the active tab's string is ever computed.
       return {
         ...state,
         data,
-        json,
-        promptText,
         images: {},
         mergedImage: null,
         nameOverrides: {},
@@ -125,24 +103,24 @@ export function reducer(state: State, action: Action): State {
     case 'MODE_CHANGED': {
       const mode = action.mode;
       const scale = reconcileScale(state.scale, mode, state.format);
-      const promptText = computePrompt(state.data, mode, state.nameOverrides, state.mergedImageName);
+      // Intentionally keep the previous preview (images / mergedImage) visible
+      // until the new export lands — avoids a flash of blank "No images to
+      // export" between toggles. The StatusBar still shows "loading…" via the
+      // exportRequestId round-trip so users know something is in flight.
       return {
         ...state,
         mode,
         scale,
-        promptText,
-        images: {},
-        mergedImage: null,
         exportRequestId: state.data ? state.exportRequestId + 1 : state.exportRequestId,
       };
     }
 
     case 'SCALE_CHANGED':
+      // Same rationale as MODE_CHANGED — keep stale preview around so the UI
+      // doesn't flicker while the new render is in flight.
       return {
         ...state,
         scale: action.scale,
-        images: {},
-        mergedImage: null,
         exportRequestId: state.data ? state.exportRequestId + 1 : state.exportRequestId,
       };
 
@@ -153,8 +131,6 @@ export function reducer(state: State, action: Action): State {
         ...state,
         format,
         scale,
-        images: {},
-        mergedImage: null,
         exportRequestId: state.data ? state.exportRequestId + 1 : state.exportRequestId,
       };
     }
@@ -163,14 +139,11 @@ export function reducer(state: State, action: Action): State {
       const overrides = { ...state.nameOverrides };
       if (action.value === '') delete overrides[action.id];
       else overrides[action.id] = action.value;
-      const promptText = computePrompt(state.data, state.mode, overrides, state.mergedImageName);
-      return { ...state, nameOverrides: overrides, promptText };
+      return { ...state, nameOverrides: overrides };
     }
 
-    case 'MERGED_NAME_CHANGED': {
-      const promptText = computePrompt(state.data, state.mode, state.nameOverrides, action.value);
-      return { ...state, mergedImageName: action.value, promptText };
-    }
+    case 'MERGED_NAME_CHANGED':
+      return { ...state, mergedImageName: action.value };
 
     case 'PROTOCOL_MISMATCH':
       return { ...state, protocolMismatch: true };
