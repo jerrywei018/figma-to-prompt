@@ -387,6 +387,13 @@ body {
   display: block;
 }
 
+/* When the rename panel is open, the inline thumbs in each row become the
+   canonical per-image map — the top strip becomes redundant, so we collapse
+   it to cut the visual noise the user flagged. Merged preview is untouched. */
+.export-card:has(.names-row[open]) .preview-area--strip {
+  display: none;
+}
+
 /* Per-image: horizontal scroll strip of thumbnails */
 .preview-strip {
   display: flex;
@@ -495,7 +502,7 @@ body {
 .name-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 11px;
 }
 
@@ -506,6 +513,26 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Inline thumbnail — replaces the text label as the row's identity anchor.
+   Checker background keeps transparent PNGs visible without extra padding. */
+.name-row-thumb {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border: 2px solid var(--fg);
+  border-radius: 6px;
+  padding: 2px;
+  background-color: var(--card);
+  background-image:
+    linear-gradient(45deg, #F1F5F9 25%, transparent 25%),
+    linear-gradient(-45deg, #F1F5F9 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #F1F5F9 75%),
+    linear-gradient(-45deg, transparent 75%, #F1F5F9 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
 }
 
 .name-input-wrap {

@@ -59,7 +59,7 @@ function PreviewArea({ state, assets }: { state: State; assets: ImageAsset[] }) 
 
   if (state.mode === 'merged') {
     return (
-      <div class="preview-area" aria-live="polite">
+      <div class="preview-area preview-area--merged" aria-live="polite">
         {state.mergedImage ? (
           <img class="preview-merged" src={state.mergedImage} alt={`Merged preview of ${state.data.name}`} />
         ) : (
@@ -75,14 +75,16 @@ function PreviewArea({ state, assets }: { state: State; assets: ImageAsset[] }) 
 
   if (thumbs.length === 0) {
     return (
-      <div class="preview-area" aria-live="polite">
+      <div class="preview-area preview-area--strip" aria-live="polite">
         <div class="preview-placeholder">No images to export</div>
       </div>
     );
   }
 
+  // `preview-area--strip` lets CSS collapse this block when the rename panel
+  // is open (the inline thumbs in each row take over as the per-image map).
   return (
-    <div class="preview-area" aria-live="polite">
+    <div class="preview-area preview-area--strip" aria-live="polite">
       <div class="preview-strip">
         {thumbs.map((t) => (
           <img
@@ -104,12 +106,15 @@ interface NameRowProps {
   placeholder: string;
   initialValue: string;
   ext: string;
+  /** Inline thumbnail — when present, replaces the text label as the primary
+   *  identifier so users can tell at a glance which image they're renaming. */
+  thumbUrl?: string;
   onCommit: (value: string) => void;
 }
 
 /** Uncontrolled input — keystrokes only fire the debounced commit, so the
  *  reducer (which rebuilds the whole prompt) doesn't run per keystroke. */
-function NameRow({ label, placeholder, initialValue, ext, onCommit }: NameRowProps) {
+function NameRow({ label, placeholder, initialValue, ext, thumbUrl, onCommit }: NameRowProps) {
   const debouncedCommit = useDebouncedCallback(onCommit, NAME_DEBOUNCE_MS);
 
   function handleInput(e: JSX.TargetedEvent<HTMLInputElement>) {
@@ -126,9 +131,13 @@ function NameRow({ label, placeholder, initialValue, ext, onCommit }: NameRowPro
 
   return (
     <div class="name-row">
-      <span class="name-row-label" title={label}>
-        {label}
-      </span>
+      {thumbUrl ? (
+        <img class="name-row-thumb" src={thumbUrl} alt={label} title={label} />
+      ) : (
+        <span class="name-row-label" title={label}>
+          {label}
+        </span>
+      )}
       <span class="name-input-wrap">
         <input
           type="text"
@@ -179,6 +188,7 @@ function RenamesList({ state, assets, dispatch }: { state: State; assets: ImageA
           placeholder={a.fileName.replace(/\.png$/, '')}
           initialValue={state.nameOverrides[a.nodeId] ?? ''}
           ext={ext}
+          thumbUrl={state.images[a.nodeId]}
           onCommit={(v) => dispatch({ type: 'NAME_OVERRIDE_CHANGED', id: a.nodeId, value: v })}
         />
       ))}
