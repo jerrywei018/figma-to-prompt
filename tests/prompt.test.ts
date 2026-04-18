@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { buildPrompt, countNodes, collectTokens, collectComponentDeps, buildTreeOutline, buildNodeDetails, collectImageAssets } from '../src/ui/prompt';
+import {
+  buildPrompt,
+  countNodes,
+  collectTokens,
+  collectComponentDeps,
+  buildTreeOutline,
+  buildNodeDetails,
+  collectImageAssets,
+  buildGeometryChecklist,
+  buildFidelityRiskSummary,
+} from '../src/ui/prompt';
 import type { UISerializedNode } from '../src/shared/types';
 
 const sampleNode: UISerializedNode = {
@@ -199,11 +209,194 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('JSON spec below');
     expect(prompt).toContain('layout.mode');
     expect(prompt).toContain('layout.sizing');
+    expect(prompt).toContain('layout.layoutPositioning');
+    expect(prompt).toContain('paint order');
   });
 
   it('omits dependencies section when no instances', () => {
     const prompt = buildPrompt(sampleNode);
     expect(prompt).not.toContain('## Component Dependencies');
+  });
+
+  it('includes geometry and verification sections', () => {
+    const prompt = buildPrompt(sampleNode);
+    expect(prompt).toContain('## Geometry Checklist');
+    expect(prompt).toContain('## Implementation Checks');
+    expect(prompt).toContain('box-sizing: border-box');
+    expect(prompt).toContain('vectorPaths');
+  });
+
+  it('includes fidelity risk summary for complex trees', () => {
+    const node: UISerializedNode = {
+      id: 'root',
+      name: 'Complex',
+      type: 'FRAME',
+      layout: { width: 100, height: 100, mode: 'none', overflow: 'hidden' },
+      children: [
+        {
+          id: 'photo',
+          name: 'Photo',
+          type: 'RECTANGLE',
+          layout: { width: 120, height: 120, x: -10, y: -10, mode: 'none', layoutPositioning: 'absolute' },
+          style: { imageFillHash: 'same', imageFillScaleMode: 'crop', imageFillTransform: [[1, 0, 0], [0, 1, 0]] },
+        },
+        {
+          id: 'vector',
+          name: 'Vector',
+          type: 'VECTOR',
+          layout: { width: 16, height: 16, x: 10, y: 10, mode: 'none' },
+          style: {
+            borderColor: '#000000',
+            borderWidth: 1,
+            strokeDashPattern: [2, 2],
+            blendMode: 'multiply',
+            isMask: true,
+            blurEffects: [{ type: 'background', radius: 12, blurType: 'normal' }],
+          },
+        },
+      ],
+    };
+
+    const summary = buildFidelityRiskSummary(node);
+    expect(summary).toContain('## Fidelity Risk Summary');
+    expect(summary).toContain('Estimated risk: high');
+    expect(summary).toContain('absolute-positioned auto-layout children');
+    expect(summary).toContain('boxes extend outside the root viewport');
+    expect(summary).toContain('image fills with crop/filter/opacity metadata');
+    expect(summary).toContain('vector-like nodes without path geometry');
+    expect(summary).toContain('nodes with detailed stroke metadata');
+    expect(summary).toContain('blur effect nodes');
+    expect(summary).toContain('nodes with layer blend mode');
+    expect(summary).toContain('mask nodes');
+    expect(buildPrompt(node)).toContain('## Fidelity Risk Summary');
+  });
+
+  it('supports compact prompt detail by omitting helper sections', () => {
+    const prompt = buildPrompt(sampleNode, { promptDetail: 'compact' });
+    expect(prompt).not.toContain('## Geometry Checklist');
+    expect(prompt).not.toContain('## Implementation Checks');
+    expect(prompt).not.toContain('## Tree Outline');
+    expect(prompt).toContain('## Component Structure');
+  });
+
+  it('supports full prompt detail with full geometry and tree outline', () => {
+    const node: UISerializedNode = {
+      id: 'root',
+      name: 'Root',
+      type: 'FRAME',
+      layout: { width: 100, height: 100, mode: 'none' },
+      children: Array.from({ length: 6 }, (_, i) => ({
+        id: `child-${i}`,
+        name: `Child ${i}`,
+        type: 'RECTANGLE' as const,
+        layout: { width: 10, height: 10, x: i * 10, y: i * 10, mode: 'none' as const },
+      })),
+    };
+    const prompt = buildPrompt(node, { promptDetail: 'full' });
+    expect(prompt).toContain('## Tree Outline');
+    expect(prompt).not.toContain('Large tree: showing');
+    expect(prompt).toContain('Root > Child 5 [RECTANGLE]');
+  });
+});
+
+describe('buildGeometryChecklist', () => {
+  it('normalizes root canvas position and accumulates child offsets', () => {
+    const node: UISerializedNode = {
+      id: 'screen',
+      name: 'Screen',
+      type: 'FRAME',
+      layout: { width: 360, height: 800, x: 100, y: 56, mode: 'none' },
+      children: [
+        {
+          id: 'card',
+          name: 'Card',
+          type: 'FRAME',
+          layout: { width: 344, height: 268, x: 8, y: 56, mode: 'vertical' },
+          children: [
+            {
+              id: 'input',
+              name: 'Input',
+              type: 'FRAME',
+              layout: { width: 312, height: 44, x: 16, y: 16, mode: 'none' },
+            },
+          ],
+        },
+      ],
+    };
+
+    const checklist = buildGeometryChecklist(node);
+    expect(checklist).toContain('Root `layout.x/y` is the Figma canvas position');
+    expect(checklist).toContain('Screen [FRAME]: left 0, top 0, width 360, height 800');
+    expect(checklist).toContain('Screen > Card [FRAME]: left 8, top 56, width 344, height 268');
+    expect(checklist).toContain('Screen > Card > Input [FRAME]: left 24, top 72, width 312, height 44');
+  });
+
+  it('marks absolute auto-layout children in the checklist', () => {
+    const node: UISerializedNode = {
+      id: 'card',
+      name: 'Card',
+      type: 'FRAME',
+      layout: { width: 328, height: 215, x: 16, y: 263, mode: 'vertical' },
+      children: [
+        {
+          id: 'art',
+          name: 'image',
+          type: 'FRAME',
+          layout: { width: 122, height: 85, x: 206, y: -25, mode: 'none', layoutPositioning: 'absolute' },
+        },
+      ],
+    };
+
+    const checklist = buildGeometryChecklist(node);
+    expect(checklist).toContain('Card > image [FRAME]: left 206, top -25, width 122, height 85, positioning absolute');
+  });
+
+  it('prioritizes high-risk geometry when the checklist is capped', () => {
+    const node: UISerializedNode = {
+      id: 'root',
+      name: 'Root',
+      type: 'FRAME',
+      layout: { width: 400, height: 400, mode: 'none' },
+      children: [
+        {
+          id: 'background',
+          name: 'Background',
+          type: 'RECTANGLE',
+          layout: { width: 400, height: 400, mode: 'none' },
+          style: { backgroundColor: '#FFFFFF' },
+        },
+        {
+          id: 'card',
+          name: 'Card',
+          type: 'FRAME',
+          layout: { width: 200, height: 200, x: 100, y: 100, mode: 'vertical', overflow: 'hidden' },
+          children: [
+            {
+              id: 'decor',
+              name: 'Decor',
+              type: 'RECTANGLE',
+              layout: { width: 40, height: 40, x: 140, y: -20, mode: 'none', layoutPositioning: 'absolute' },
+              style: { imageFillHash: 'decor', imageFillScaleMode: 'crop' },
+            },
+            {
+              id: 'label',
+              name: 'Label',
+              type: 'TEXT',
+              text: 'Label',
+              layout: { width: 40, height: 20, x: 16, y: 16, mode: 'none' },
+            },
+          ],
+        },
+      ],
+    };
+
+    const checklist = buildGeometryChecklist(node, 4);
+    expect(checklist).toContain('Large tree: showing 4 priority boxes out of 5');
+    expect(checklist).toContain('Root [FRAME]');
+    expect(checklist).toContain('Root > Background [RECTANGLE]');
+    expect(checklist).toContain('Root > Card [FRAME]');
+    expect(checklist).toContain('Root > Card > Decor [RECTANGLE]');
+    expect(checklist).not.toContain('Root > Card > Label [TEXT]');
   });
 });
 
@@ -229,6 +422,18 @@ describe('buildNodeDetails', () => {
     const parsed = JSON.parse(details);
     expect(parsed.children[1].componentName).toBe('Button/Primary');
     expect(parsed.children[2].componentName).toBe('Icon/Arrow');
+  });
+
+  it('preserves vector path data', () => {
+    const node: UISerializedNode = {
+      id: '1',
+      name: 'Icon',
+      type: 'VECTOR',
+      layout: { width: 24, height: 24 },
+      vectorPaths: [{ windingRule: 'NONZERO', data: 'M 7 4 L 17 12 L 7 20 Z' }],
+    };
+    const parsed = JSON.parse(buildNodeDetails(node));
+    expect(parsed.vectorPaths).toEqual([{ windingRule: 'NONZERO', data: 'M 7 4 L 17 12 L 7 20 Z' }]);
   });
 
   it('is a single line (no newlines)', () => {
@@ -338,6 +543,32 @@ describe('image assets', () => {
       expect(collectImageAssets(node)).toHaveLength(1);
     });
 
+    it('does not deduplicate the same image hash when rendered paint metadata differs', () => {
+      const node: UISerializedNode = {
+        id: '1', name: 'Wrapper', type: 'FRAME',
+        layout: { width: 100, height: 100 },
+        children: [
+          {
+            id: '2',
+            name: 'A',
+            type: 'RECTANGLE',
+            layout: { width: 50, height: 50 },
+            style: { imageFillHash: 'same', imageFillScaleMode: 'crop', imageFillTransform: [[1, 0, 0], [0, 1, 0]] },
+          },
+          {
+            id: '3',
+            name: 'B',
+            type: 'RECTANGLE',
+            layout: { width: 50, height: 50 },
+            style: { imageFillHash: 'same', imageFillScaleMode: 'crop', imageFillTransform: [[0.5, 0, 0.25], [0, 0.5, 0.1]] },
+          },
+        ],
+      };
+      const assets = collectImageAssets(node);
+      expect(assets).toHaveLength(2);
+      expect(assets.map((a) => a.nodeId)).toEqual(['2', '3']);
+    });
+
     it('returns empty array when no images', () => {
       expect(collectImageAssets(sampleNode)).toHaveLength(0);
     });
@@ -392,6 +623,36 @@ describe('image assets', () => {
       const assets = collectImageAssets(nodeWithImage, { '2': '' });
       expect(assets[0].fileName).toBe('Hero_Section_Hero_Background.png');
     });
+
+    it('includes image paint metadata used for crop and filter fidelity', () => {
+      const node: UISerializedNode = {
+        id: '1', name: 'Wrapper', type: 'FRAME',
+        layout: { width: 100, height: 100 },
+        children: [
+          {
+            id: '2',
+            name: 'Photo',
+            type: 'RECTANGLE',
+            layout: { width: 50, height: 50 },
+            style: {
+              imageFillHash: 'photo',
+              imageFillScaleMode: 'crop',
+              imageFillTransform: [[0.5, 0, 0.25], [0, 0.5, 0.1]],
+              imageFillRotation: 90,
+              imageFillFilters: { exposure: 0.2 },
+              imageFillOpacity: 0.8,
+            },
+          },
+        ],
+      };
+      expect(collectImageAssets(node)[0]).toEqual(expect.objectContaining({
+        scaleMode: 'crop',
+        transform: [[0.5, 0, 0.25], [0, 0.5, 0.1]],
+        rotation: 90,
+        filters: { exposure: 0.2 },
+        opacity: 0.8,
+      }));
+    });
   });
 
   describe('buildPrompt with images', () => {
@@ -412,6 +673,32 @@ describe('image assets', () => {
       const prompt = buildPrompt(nodeWithImage, { imageNameOverrides: { '2': 'hero_bg' } });
       expect(prompt).toContain('`hero_bg.png`');
       expect(prompt).not.toContain('`Hero_Section_Hero_Background.png`');
+    });
+
+    it('reflects image paint metadata in Assets section', () => {
+      const node: UISerializedNode = {
+        id: '1', name: 'Wrapper', type: 'FRAME',
+        layout: { width: 100, height: 100 },
+        children: [
+          {
+            id: '2',
+            name: 'Photo',
+            type: 'RECTANGLE',
+            layout: { width: 50, height: 50 },
+            style: {
+              imageFillHash: 'photo',
+              imageFillScaleMode: 'crop',
+              imageFillTransform: [[0.5, 0, 0.25], [0, 0.5, 0.1]],
+              imageFillFilters: { exposure: 0.2 },
+              imageFillOpacity: 0.8,
+            },
+          },
+        ],
+      };
+      const prompt = buildPrompt(node);
+      expect(prompt).toContain('crop, opacity 0.8');
+      expect(prompt).toContain('transform [[0.5,0,0.25],[0,0.5,0.1]]');
+      expect(prompt).toContain('filters {"exposure":0.2}');
     });
 
     it('in merged mode only lists composite, omits per-image fills to avoid misleading the AI', () => {

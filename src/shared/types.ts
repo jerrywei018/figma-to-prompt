@@ -7,6 +7,7 @@ export type UINodeType =
   | 'COMPONENT'
   | 'SECTION'
   | 'COMPONENT_SET'
+  | 'SLOT'
   | 'ELLIPSE'
   | 'LINE'
   | 'VECTOR'
@@ -25,7 +26,16 @@ export interface UISerializedNode {
   componentName?: string;
   /** Variant properties — e.g. { State: "Active", Size: "Large" } */
   componentProperties?: Record<string, string>;
+  /** SVG-compatible vector path data when Figma exposes it for vector-like nodes */
+  vectorPaths?: UIVectorPath[];
+  fillGeometry?: UIVectorPath[];
+  strokeGeometry?: UIVectorPath[];
   children?: UISerializedNode[];
+}
+
+export interface UIVectorPath {
+  windingRule: 'NONZERO' | 'EVENODD' | 'NONE';
+  data: string;
 }
 
 export interface UILayout {
@@ -35,7 +45,16 @@ export interface UILayout {
   x?: number;
   y?: number;
   rotation?: number;
+  constraints?: {
+    horizontal: 'min' | 'center' | 'max' | 'stretch' | 'scale';
+    vertical: 'min' | 'center' | 'max' | 'stretch' | 'scale';
+  };
+  targetAspectRatio?: { x: number; y: number };
+  layoutPositioning?: 'auto' | 'absolute';
+  layoutAlign?: 'min' | 'center' | 'max' | 'stretch' | 'inherit';
+  layoutGrow?: number;
   gap?: number;
+  strokesIncludedInLayout?: boolean;
   padding?: {
     top: number;
     right: number;
@@ -52,11 +71,31 @@ export interface UILayout {
 }
 
 export interface UIStyle {
+  blendMode?: string;
+  isMask?: boolean;
+  maskType?: 'alpha' | 'vector' | 'luminance';
   backgroundColor?: string;
+  backgroundOpacity?: number;
   color?: string;
+  colorOpacity?: number;
   borderRadius?: number;
   borderWidth?: number;
   borderColor?: string;
+  borderOpacity?: number;
+  strokeAlign?: 'center' | 'inside' | 'outside';
+  strokeCap?:
+    | 'none'
+    | 'round'
+    | 'square'
+    | 'arrow-lines'
+    | 'arrow-equilateral'
+    | 'diamond-filled'
+    | 'triangle-filled'
+    | 'circle-filled';
+  strokeJoin?: 'miter' | 'bevel' | 'round';
+  strokeMiterLimit?: number;
+  strokeDashPattern?: number[];
+  strokeWeights?: { top: number; right: number; bottom: number; left: number };
   opacity?: number;
   fontFamily?: string;
   fontSize?: number;
@@ -74,22 +113,58 @@ export interface UIStyle {
   shadows?: Array<{
     type: 'drop' | 'inner';
     color: string;
+    opacity?: number;
+    blendMode?: string;
+    showShadowBehindNode?: boolean;
     offsetX: number;
     offsetY: number;
     blur: number;
     spread: number;
   }>;
+  blurEffects?: Array<{
+    type: 'layer' | 'background';
+    radius: number;
+    blurType?: 'normal' | 'progressive';
+    startRadius?: number;
+    startOffset?: { x: number; y: number };
+    endOffset?: { x: number; y: number };
+  }>;
   /** Gradient fill as CSS-like string — e.g. "linear-gradient(135deg, #F00 0%, #00F 100%)" */
   backgroundGradient?: string;
+  backgroundGradientType?: 'linear' | 'radial' | 'angular' | 'diamond';
+  backgroundGradientStops?: Array<{ color: string; position: number; opacity?: number }>;
+  backgroundGradientTransform?: UITransform;
+  backgroundGradientOpacity?: number;
+  backgroundGradientBlendMode?: string;
   /** Individual corner radii when not uniform */
   cornerRadii?: { topLeft: number; topRight: number; bottomRight: number; bottomLeft: number };
   /** Image fill hash — present when node has an IMAGE type fill */
   imageFillHash?: string;
   /** Image scale mode */
   imageFillScaleMode?: 'fill' | 'fit' | 'crop' | 'tile';
+  imageFillTransform?: UITransform;
+  imageFillScalingFactor?: number;
+  imageFillRotation?: number;
+  imageFillFilters?: UIImageFilters;
+  imageFillOpacity?: number;
+  imageFillBlendMode?: string;
   /** Variable/token bindings — e.g. { backgroundColor: "BG/BG Neutral 1" } */
   variables?: Record<string, string>;
 }
+
+export type UITransform = [[number, number, number], [number, number, number]];
+
+export interface UIImageFilters {
+  exposure?: number;
+  contrast?: number;
+  saturation?: number;
+  temperature?: number;
+  tint?: number;
+  highlights?: number;
+  shadows?: number;
+}
+
+export type PromptDetailLevel = 'compact' | 'detailed' | 'full';
 
 /**
  * Protocol version for sandbox ↔ UI compatibility.

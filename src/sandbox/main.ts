@@ -1,6 +1,7 @@
 import { extractNode } from './extractor';
 import { normalizeNode } from './normalizer';
 import { PROTOCOL_VERSION } from '../shared/types';
+import { getImageAssetKey, hasRenderSpecificImagePaint } from '../shared/imageAssets';
 import type { SandboxMessage, UISerializedNode, UIMessage, UILayout } from '../shared/types';
 
 figma.showUI(__html__, { width: 480, height: 560 });
@@ -74,22 +75,40 @@ function buildMultiSelectionRoot(selection: ReadonlyArray<SceneNode>): UISeriali
 let currentExportId = 0;
 let lastNormalized: UISerializedNode | null = null;
 
-interface ImageNode { id: string; hash: string }
+interface ImageNode { id: string; hash: string; renderAtOriginalScale: boolean }
 
-/** Collect nodes that have image fills (deduplicated by hash) */
+/** Collect nodes that have image fills, deduped by rendered appearance. */
 function collectImageNodes(node: UISerializedNode): ImageNode[] {
-  const nodes: ImageNode[] = [];
-  const seen = new Set<string>();
+  const entries: Array<{ id: string; hash: string; key: string; renderSpecific: boolean }> = [];
+  const seenKeys = new Set<string>();
   function walk(n: UISerializedNode): void {
     if (n.visible === false) return;
-    if (n.style?.imageFillHash && !seen.has(n.style.imageFillHash)) {
-      seen.add(n.style.imageFillHash);
-      nodes.push({ id: n.id, hash: n.style.imageFillHash });
+    const key = getImageAssetKey(n);
+    if (n.style?.imageFillHash && key && !seenKeys.has(key)) {
+      seenKeys.add(key);
+      entries.push({
+        id: n.id,
+        hash: n.style.imageFillHash,
+        key,
+        renderSpecific: hasRenderSpecificImagePaint(n),
+      });
     }
     n.children?.forEach(walk);
   }
   walk(node);
-  return nodes;
+
+  const keysByHash = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    const keys = keysByHash.get(entry.hash) ?? new Set<string>();
+    keys.add(entry.key);
+    keysByHash.set(entry.hash, keys);
+  }
+
+  return entries.map((entry) => ({
+    id: entry.id,
+    hash: entry.hash,
+    renderAtOriginalScale: entry.renderSpecific || (keysByHash.get(entry.hash)?.size ?? 0) > 1,
+  }));
 }
 
 function uint8ArrayToBase64(bytes: Uint8Array): string {
@@ -228,10 +247,23 @@ async function exportImages(
   // upstream in Figma; we honor the user's format choice rather than silently
   // downgrading to PNG.
   if (scale === 0) {
-    // Original quality: getImageByHash returns the uploaded raster at full resolution
+    // Original quality: getImageByHash returns the uploaded raster at full resolution.
+    // If the same hash appears with different rendered paint metadata, export the
+    // node instead so crop/filter/opacity variants do not collapse to one file.
     for (const img of imageNodes) {
       if (exportId !== currentExportId) return;
       try {
+        if (img.renderAtOriginalScale) {
+          const sceneNode = figma.getNodeById(img.id);
+          if (!sceneNode || !('exportAsync' in sceneNode)) continue;
+          const bytes = await (sceneNode as SceneNode).exportAsync({
+            format: 'PNG',
+            constraint: { type: 'SCALE' as const, value: 1 },
+          });
+          images[img.id] = `data:image/png;base64,${uint8ArrayToBase64(bytes)}`;
+          continue;
+        }
+
         const image = figma.getImageByHash(img.hash);
         if (image) {
           const bytes = await image.getBytesAsync();

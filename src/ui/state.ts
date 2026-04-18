@@ -1,5 +1,5 @@
 import { collectImageAssets } from './prompt';
-import type { ExportMode, ImageFormat, ImageNameOverrides, UISerializedNode } from '../shared/types';
+import type { ExportMode, ImageFormat, ImageNameOverrides, PromptDetailLevel, UISerializedNode } from '../shared/types';
 
 export type Tab = 'json' | 'prompt';
 type LossyImageFormat = Extract<ImageFormat, 'JPG' | 'WEBP' | 'AVIF'>;
@@ -13,6 +13,7 @@ export const AVIF_DEFAULT_QUALITY = 0.8;
 export interface State {
   data: UISerializedNode | null;
   tab: Tab;
+  promptDetail: PromptDetailLevel;
   /** Preview images mirrored from the sandbox source. Download encoding is
    *  deferred until the user clicks Download so quality changes stay cheap. */
   images: Record<string, string>;
@@ -41,6 +42,7 @@ export interface State {
 export const initialState: State = {
   data: null,
   tab: 'json',
+  promptDetail: 'detailed',
   images: {},
   mergedImage: null,
   rawImages: {},
@@ -66,6 +68,7 @@ export type Action =
   /** Preview images ready for display. */
   | { type: 'IMAGES_RECEIVED'; images: Record<string, string>; merged?: string | null }
   | { type: 'TAB_CHANGED'; tab: Tab }
+  | { type: 'PROMPT_DETAIL_CHANGED'; promptDetail: PromptDetailLevel }
   | { type: 'MODE_CHANGED'; mode: ExportMode }
   | { type: 'SCALE_CHANGED'; scale: number }
   | { type: 'FORMAT_CHANGED'; format: ImageFormat }
@@ -123,6 +126,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...initialState,
         tab: state.tab,
+        promptDetail: state.promptDetail,
         scale: state.scale,
         format: state.format,
         quality: state.quality,
@@ -169,6 +173,9 @@ export function reducer(state: State, action: Action): State {
 
     case 'TAB_CHANGED':
       return { ...state, tab: action.tab };
+
+    case 'PROMPT_DETAIL_CHANGED':
+      return { ...state, promptDetail: action.promptDetail };
 
     case 'MODE_CHANGED': {
       const mode = action.mode;

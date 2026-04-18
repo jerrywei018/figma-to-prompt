@@ -11,6 +11,8 @@ import { CopyButton } from './components/CopyButton';
 import { ExportCard } from './components/ExportCard';
 import { Banners } from './components/Banners';
 import { StatusBar } from './components/StatusBar';
+import { ButtonGroup } from './components/ButtonGroup';
+import type { PromptDetailLevel } from '../shared/types';
 
 type MergedTilesPayload = NonNullable<ImageDataMessage['mergedTiles']>;
 
@@ -69,6 +71,12 @@ async function composeMergedTiles(payload: MergedTilesPayload): Promise<string |
 declare const __APP_VERSION__: string;
 
 const REPO = 'runkids/figma-to-prompt';
+
+const PROMPT_DETAIL_OPTIONS: { value: PromptDetailLevel; label: string }[] = [
+  { value: 'compact', label: 'Compact' },
+  { value: 'detailed', label: 'Detailed' },
+  { value: 'full', label: 'Full' },
+];
 
 function sendToSandbox(msg: UIMessage): void {
   parent.postMessage({ pluginMessage: msg }, '*');
@@ -198,6 +206,7 @@ export function App() {
     return buildPrompt(state.data, {
       imageNameOverrides: state.nameOverrides,
       merged,
+      promptDetail: state.promptDetail,
     });
   }, [
     state.tab,
@@ -205,6 +214,7 @@ export function App() {
     state.mode,
     state.nameOverrides,
     state.mergedImageName,
+    state.promptDetail,
   ]);
 
   return (
@@ -217,6 +227,15 @@ export function App() {
         hasData={!!state.data}
       />
       <div class="actions-bar">
+        {state.tab === 'prompt' && state.data && (
+          <ButtonGroup
+            ariaLabel="Prompt detail"
+            variant="chip"
+            options={PROMPT_DETAIL_OPTIONS}
+            value={state.promptDetail}
+            onChange={(promptDetail) => dispatch({ type: 'PROMPT_DETAIL_CHANGED', promptDetail })}
+          />
+        )}
         <CopyButton tab={state.tab} text={text} />
         <ExportCard state={state} dispatch={dispatch} />
       </div>

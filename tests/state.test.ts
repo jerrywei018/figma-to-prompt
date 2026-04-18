@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { AVIF_DEFAULT_QUALITY, DEFAULT_QUALITY, initialState, reducer } from '../src/ui/state';
 
 describe('export quality state', () => {
+  it('updates and preserves prompt detail preference', () => {
+    let state = reducer(initialState, { type: 'PROMPT_DETAIL_CHANGED', promptDetail: 'compact' });
+    expect(state.promptDetail).toBe('compact');
+
+    state = reducer(state, { type: 'SELECTION_EMPTY' });
+    expect(state.promptDetail).toBe('compact');
+  });
+
   it('defaults AVIF quality to 80%', () => {
     const state = reducer(initialState, { type: 'FORMAT_CHANGED', format: 'AVIF' });
 

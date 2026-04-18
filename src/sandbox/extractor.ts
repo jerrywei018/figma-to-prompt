@@ -1,4 +1,4 @@
-import type { UISerializedNode, UINodeType, UILayout, UIStyle } from '@shared/types';
+import type { UISerializedNode, UINodeType, UILayout, UIStyle, UIImageFilters, UITransform, UIVectorPath } from '@shared/types';
 import { rgbaToHex, normalizeLineHeight } from './normalizer';
 
 // Types that we know how to fully extract
@@ -12,6 +12,7 @@ interface FillPaint {
   color?: { r: number; g: number; b: number };
   opacity?: number;
   visible?: boolean;
+  blendMode?: string;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,6 +21,86 @@ type AnyNode = Record<string, any>;
 function firstSolidFill(fills: FillPaint[]): FillPaint | undefined {
   if (!Array.isArray(fills)) return undefined;
   return fills.find((f) => f.type === 'SOLID' && f.visible !== false);
+}
+
+function paintOpacity(paint: FillPaint | AnyNode): number | undefined {
+  return typeof paint.opacity === 'number' && paint.opacity < 1 ? paint.opacity : undefined;
+}
+
+function paintBlendMode(paint: FillPaint | AnyNode): string | undefined {
+  return typeof paint.blendMode === 'string' && paint.blendMode !== 'NORMAL'
+    ? paint.blendMode.toLowerCase()
+    : undefined;
+}
+
+function extractTransform(value: unknown): UITransform | undefined {
+  if (!Array.isArray(value) || value.length !== 2) return undefined;
+  const rows = value as unknown[];
+  if (!rows.every((row) => Array.isArray(row) && row.length === 3 && row.every((v) => typeof v === 'number'))) {
+    return undefined;
+  }
+  const r0 = rows[0] as number[];
+  const r1 = rows[1] as number[];
+  return [
+    [r0[0], r0[1], r0[2]],
+    [r1[0], r1[1], r1[2]],
+  ];
+}
+
+function extractImageFilters(value: unknown): UIImageFilters | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const source = value as Record<string, unknown>;
+  const result: UIImageFilters = {};
+  for (const key of ['exposure', 'contrast', 'saturation', 'temperature', 'tint', 'highlights', 'shadows'] as const) {
+    const val = source[key];
+    if (typeof val === 'number' && val !== 0) {
+      result[key] = val;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function extractVectorPaths(value: unknown): UIVectorPath[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const paths = value
+    .map((path) => {
+      const p = path as Record<string, unknown>;
+      if (typeof p.data !== 'string') return null;
+      const windingRule = p.windingRule;
+      if (windingRule !== 'NONZERO' && windingRule !== 'EVENODD' && windingRule !== 'NONE') return null;
+      return { windingRule, data: p.data };
+    })
+    .filter((path): path is UIVectorPath => path !== null);
+  return paths.length > 0 ? paths : undefined;
+}
+
+function extractVectorData(node: AnyNode): Pick<UISerializedNode, 'vectorPaths' | 'fillGeometry' | 'strokeGeometry'> {
+  const vectorData: Pick<UISerializedNode, 'vectorPaths' | 'fillGeometry' | 'strokeGeometry'> = {};
+  const vectorPaths = extractVectorPaths(node.vectorPaths);
+  if (vectorPaths) vectorData.vectorPaths = vectorPaths;
+  const fillGeometry = extractVectorPaths(node.fillGeometry);
+  if (fillGeometry) vectorData.fillGeometry = fillGeometry;
+  const strokeGeometry = extractVectorPaths(node.strokeGeometry);
+  if (strokeGeometry) vectorData.strokeGeometry = strokeGeometry;
+  return vectorData;
+}
+
+function normalizeEnumValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.toLowerCase().replace(/_/g, '-') : undefined;
+}
+
+function normalizeConstraint(value: unknown): UILayout['constraints']['horizontal'] | undefined {
+  const normalized = normalizeEnumValue(value);
+  if (
+    normalized === 'min' ||
+    normalized === 'center' ||
+    normalized === 'max' ||
+    normalized === 'stretch' ||
+    normalized === 'scale'
+  ) {
+    return normalized;
+  }
+  return undefined;
 }
 
 /** Resolve a Figma variable ID to its token name */
@@ -68,6 +149,16 @@ function extractVariables(node: AnyNode, isText = false): Record<string, string>
 function extractStyle(node: AnyNode, isText = false): UIStyle {
   const style: UIStyle = {};
 
+  const nodeBlendMode = paintBlendMode(node);
+  if (nodeBlendMode) style.blendMode = nodeBlendMode;
+  if (node.isMask === true) {
+    style.isMask = true;
+    const maskType = normalizeEnumValue(node.maskType);
+    if (maskType === 'alpha' || maskType === 'vector' || maskType === 'luminance') {
+      style.maskType = maskType;
+    }
+  }
+
   // Background / fill color
   const fills: FillPaint[] = node.fills ?? [];
   const fill = firstSolidFill(fills);
@@ -75,8 +166,12 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
     const hex = rgbaToHex({ r: fill.color.r, g: fill.color.g, b: fill.color.b, a: fill.opacity ?? 1 });
     if (isText) {
       style.color = hex;
+      const opacity = paintOpacity(fill);
+      if (opacity !== undefined) style.colorOpacity = opacity;
     } else {
       style.backgroundColor = hex;
+      const opacity = paintOpacity(fill);
+      if (opacity !== undefined) style.backgroundOpacity = opacity;
     }
   }
 
@@ -102,8 +197,50 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
   const stroke = firstSolidFill(strokes);
   if (stroke?.color) {
     style.borderColor = rgbaToHex({ r: stroke.color.r, g: stroke.color.g, b: stroke.color.b, a: stroke.opacity ?? 1 });
+    const opacity = paintOpacity(stroke);
+    if (opacity !== undefined) style.borderOpacity = opacity;
     if (typeof node.strokeWeight === 'number') {
       style.borderWidth = node.strokeWeight;
+    }
+    const strokeAlign = normalizeEnumValue(node.strokeAlign);
+    if (strokeAlign === 'center' || strokeAlign === 'inside' || strokeAlign === 'outside') {
+      style.strokeAlign = strokeAlign;
+    }
+    const strokeCap = normalizeEnumValue(node.strokeCap);
+    if (
+      strokeCap === 'none' ||
+      strokeCap === 'round' ||
+      strokeCap === 'square' ||
+      strokeCap === 'arrow-lines' ||
+      strokeCap === 'arrow-equilateral' ||
+      strokeCap === 'diamond-filled' ||
+      strokeCap === 'triangle-filled' ||
+      strokeCap === 'circle-filled'
+    ) {
+      style.strokeCap = strokeCap;
+    }
+    const strokeJoin = normalizeEnumValue(node.strokeJoin);
+    if (strokeJoin === 'miter' || strokeJoin === 'bevel' || strokeJoin === 'round') {
+      style.strokeJoin = strokeJoin;
+    }
+    if (typeof node.strokeMiterLimit === 'number') {
+      style.strokeMiterLimit = node.strokeMiterLimit;
+    }
+    if (Array.isArray(node.dashPattern) && node.dashPattern.every((v: unknown) => typeof v === 'number')) {
+      style.strokeDashPattern = [...node.dashPattern];
+    }
+    if (
+      typeof node.strokeTopWeight === 'number' ||
+      typeof node.strokeRightWeight === 'number' ||
+      typeof node.strokeBottomWeight === 'number' ||
+      typeof node.strokeLeftWeight === 'number'
+    ) {
+      style.strokeWeights = {
+        top: typeof node.strokeTopWeight === 'number' ? node.strokeTopWeight : (typeof node.strokeWeight === 'number' ? node.strokeWeight : 0),
+        right: typeof node.strokeRightWeight === 'number' ? node.strokeRightWeight : (typeof node.strokeWeight === 'number' ? node.strokeWeight : 0),
+        bottom: typeof node.strokeBottomWeight === 'number' ? node.strokeBottomWeight : (typeof node.strokeWeight === 'number' ? node.strokeWeight : 0),
+        left: typeof node.strokeLeftWeight === 'number' ? node.strokeLeftWeight : (typeof node.strokeWeight === 'number' ? node.strokeWeight : 0),
+      };
     }
   }
 
@@ -128,15 +265,37 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
   const effects: AnyNode[] = node.effects ?? [];
   const shadows = effects
     .filter((e) => (e.type === 'DROP_SHADOW' || e.type === 'INNER_SHADOW') && e.visible !== false)
-    .map((e) => ({
-      type: (e.type === 'DROP_SHADOW' ? 'drop' : 'inner') as 'drop' | 'inner',
-      color: rgbaToHex({ r: e.color.r, g: e.color.g, b: e.color.b, a: e.color.a ?? 1 }),
-      offsetX: e.offset?.x ?? 0,
-      offsetY: e.offset?.y ?? 0,
-      blur: e.radius ?? 0,
-      spread: e.spread ?? 0,
-    }));
+    .map((e) => {
+      const shadow = {
+        type: (e.type === 'DROP_SHADOW' ? 'drop' : 'inner') as 'drop' | 'inner',
+        color: rgbaToHex({ r: e.color.r, g: e.color.g, b: e.color.b, a: e.color.a ?? 1 }),
+        ...(typeof e.color.a === 'number' && e.color.a < 1 ? { opacity: e.color.a } : {}),
+        offsetX: e.offset?.x ?? 0,
+        offsetY: e.offset?.y ?? 0,
+        blur: e.radius ?? 0,
+        spread: e.spread ?? 0,
+        ...(paintBlendMode(e) ? { blendMode: paintBlendMode(e) } : {}),
+        ...(e.showShadowBehindNode === true ? { showShadowBehindNode: true } : {}),
+      };
+      return shadow;
+    });
   if (shadows.length > 0) style.shadows = shadows;
+
+  const blurEffects = effects
+    .filter((e) => (e.type === 'LAYER_BLUR' || e.type === 'BACKGROUND_BLUR') && e.visible !== false)
+    .map((e) => ({
+      type: (e.type === 'BACKGROUND_BLUR' ? 'background' : 'layer') as 'layer' | 'background',
+      radius: e.radius ?? 0,
+      ...(e.blurType === 'NORMAL' || e.blurType === 'PROGRESSIVE' ? { blurType: normalizeEnumValue(e.blurType) as 'normal' | 'progressive' } : {}),
+      ...(typeof e.startRadius === 'number' ? { startRadius: e.startRadius } : {}),
+      ...(e.startOffset && typeof e.startOffset.x === 'number' && typeof e.startOffset.y === 'number'
+        ? { startOffset: { x: e.startOffset.x, y: e.startOffset.y } }
+        : {}),
+      ...(e.endOffset && typeof e.endOffset.x === 'number' && typeof e.endOffset.y === 'number'
+        ? { endOffset: { x: e.endOffset.x, y: e.endOffset.y } }
+        : {}),
+    }));
+  if (blurEffects.length > 0) style.blurEffects = blurEffects;
 
   // Image fill
   if (!isText) {
@@ -147,6 +306,16 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
       const imgNode = imageFill as AnyNode;
       if (imgNode.imageHash) style.imageFillHash = imgNode.imageHash;
       if (imgNode.scaleMode) style.imageFillScaleMode = (imgNode.scaleMode as string).toLowerCase() as UIStyle['imageFillScaleMode'];
+      const transform = extractTransform(imgNode.imageTransform);
+      if (transform) style.imageFillTransform = transform;
+      if (typeof imgNode.scalingFactor === 'number') style.imageFillScalingFactor = imgNode.scalingFactor;
+      if (typeof imgNode.rotation === 'number' && imgNode.rotation !== 0) style.imageFillRotation = imgNode.rotation;
+      const filters = extractImageFilters(imgNode.filters);
+      if (filters) style.imageFillFilters = filters;
+      const opacity = paintOpacity(imgNode);
+      if (opacity !== undefined) style.imageFillOpacity = opacity;
+      const blendMode = paintBlendMode(imgNode);
+      if (blendMode) style.imageFillBlendMode = blendMode;
     }
   }
 
@@ -158,13 +327,32 @@ function extractStyle(node: AnyNode, isText = false): UIStyle {
     if (gradient) {
       const gNode = gradient as AnyNode;
       const stops: AnyNode[] = gNode.gradientStops ?? [];
+      const gradientStops = stops.map((s: AnyNode) => ({
+        color: rgbaToHex({ r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a ?? 1 }),
+        position: s.position,
+        ...(typeof s.color.a === 'number' && s.color.a < 1 ? { opacity: s.color.a } : {}),
+      }));
       const stopStrs = stops.map(
         (s: AnyNode) =>
           `${rgbaToHex({ r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a ?? 1 })} ${Math.round(s.position * 100)}%`,
       );
-      const type = gNode.type === 'GRADIENT_RADIAL' ? 'radial-gradient' : 'linear-gradient';
+      const gradientTypeMap: Record<string, NonNullable<UIStyle['backgroundGradientType']>> = {
+        GRADIENT_LINEAR: 'linear',
+        GRADIENT_RADIAL: 'radial',
+        GRADIENT_ANGULAR: 'angular',
+        GRADIENT_DIAMOND: 'diamond',
+      };
+      const cssType = gNode.type === 'GRADIENT_RADIAL' ? 'radial-gradient' : 'linear-gradient';
       if (!isText) {
-        style.backgroundGradient = `${type}(${stopStrs.join(', ')})`;
+        style.backgroundGradient = `${cssType}(${stopStrs.join(', ')})`;
+        if (gradientTypeMap[gNode.type]) style.backgroundGradientType = gradientTypeMap[gNode.type];
+        if (gradientStops.length > 0) style.backgroundGradientStops = gradientStops;
+        const transform = extractTransform(gNode.gradientTransform);
+        if (transform) style.backgroundGradientTransform = transform;
+        const opacity = paintOpacity(gNode);
+        if (opacity !== undefined) style.backgroundGradientOpacity = opacity;
+        const blendMode = paintBlendMode(gNode);
+        if (blendMode) style.backgroundGradientBlendMode = blendMode;
       }
     }
   }
@@ -238,13 +426,51 @@ function extractLayout(node: AnyNode): UILayout {
     height: node.height,
   };
 
+  const toSizing = (m: string | undefined): 'hug' | 'fill' | 'fixed' | undefined => {
+    if (m === 'AUTO' || m === 'HUG') return 'hug';
+    if (m === 'FILL') return 'fill';
+    if (m === 'FIXED') return 'fixed';
+    return undefined;
+  };
+
   // Position relative to parent
   if (typeof node.x === 'number' && node.x !== 0) layout.x = node.x;
   if (typeof node.y === 'number' && node.y !== 0) layout.y = node.y;
 
+  // Auto-layout child behavior. `ABSOLUTE` children keep x/y but are removed
+  // from the parent's flex flow, which is critical for decorative overlaps.
+  if (node.layoutPositioning === 'ABSOLUTE') {
+    layout.layoutPositioning = 'absolute';
+  }
+  const layoutAlignMap: Record<string, UILayout['layoutAlign']> = {
+    MIN: 'min',
+    CENTER: 'center',
+    MAX: 'max',
+    STRETCH: 'stretch',
+    INHERIT: 'inherit',
+  };
+  if (typeof node.layoutAlign === 'string' && layoutAlignMap[node.layoutAlign]) {
+    layout.layoutAlign = layoutAlignMap[node.layoutAlign];
+  }
+  if (typeof node.layoutGrow === 'number' && node.layoutGrow !== 0) {
+    layout.layoutGrow = node.layoutGrow;
+  }
+
   // Rotation
   if (typeof node.rotation === 'number' && node.rotation !== 0) {
     layout.rotation = Math.round(node.rotation * 100) / 100;
+  }
+
+  if (node.constraints && typeof node.constraints === 'object') {
+    const horizontal = normalizeConstraint(node.constraints.horizontal);
+    const vertical = normalizeConstraint(node.constraints.vertical);
+    if (horizontal && vertical) {
+      layout.constraints = { horizontal, vertical };
+    }
+  }
+
+  if (node.targetAspectRatio && typeof node.targetAspectRatio.x === 'number' && typeof node.targetAspectRatio.y === 'number') {
+    layout.targetAspectRatio = { x: node.targetAspectRatio.x, y: node.targetAspectRatio.y };
   }
 
   // Overflow / clip content
@@ -255,6 +481,9 @@ function extractLayout(node: AnyNode): UILayout {
 
   if (layoutMode === 'HORIZONTAL' || layoutMode === 'VERTICAL') {
     layout.gap = node.itemSpacing;
+    if (typeof node.strokesIncludedInLayout === 'boolean') {
+      layout.strokesIncludedInLayout = node.strokesIncludedInLayout;
+    }
     layout.padding = {
       top: node.paddingTop ?? 0,
       right: node.paddingRight ?? 0,
@@ -273,23 +502,29 @@ function extractLayout(node: AnyNode): UILayout {
     // Sizing
     const primaryMode: string = node.primaryAxisSizingMode ?? 'FIXED';
     const counterMode: string = node.counterAxisSizingMode ?? 'FIXED';
-    const toSizing = (m: string): 'hug' | 'fill' | 'fixed' => {
-      if (m === 'AUTO') return 'hug';
-      if (m === 'FILL') return 'fill';
-      return 'fixed';
-    };
 
     if (layoutMode === 'HORIZONTAL') {
       layout.sizing = {
-        horizontal: toSizing(primaryMode),
-        vertical: toSizing(counterMode),
+        horizontal: toSizing(primaryMode) ?? 'fixed',
+        vertical: toSizing(counterMode) ?? 'fixed',
       };
     } else {
       layout.sizing = {
-        horizontal: toSizing(counterMode),
-        vertical: toSizing(primaryMode),
+        horizontal: toSizing(counterMode) ?? 'fixed',
+        vertical: toSizing(primaryMode) ?? 'fixed',
       };
     }
+  }
+
+  // Newer Figma layout sizing fields apply to children too. Prefer them when
+  // available because they preserve fill/hug intent for non-auto-layout nodes.
+  const horizontalSizing = toSizing(node.layoutSizingHorizontal);
+  const verticalSizing = toSizing(node.layoutSizingVertical);
+  if (horizontalSizing || verticalSizing) {
+    layout.sizing = {
+      horizontal: horizontalSizing ?? layout.sizing?.horizontal ?? 'fixed',
+      vertical: verticalSizing ?? layout.sizing?.vertical ?? 'fixed',
+    };
   }
 
   return layout;
@@ -312,6 +547,7 @@ export function extractNode(node: SceneNode): UISerializedNode | null {
     name: n.name as string,
     type: nodeType as UINodeType,
     visible: n.visible as boolean,
+    ...extractVectorData(n),
   };
 
   // TEXT — special: extract text content + typography
