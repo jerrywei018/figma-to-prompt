@@ -26,6 +26,21 @@ export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return res.blob();
 }
 
+export function dataUrlToText(dataUrl: string): string {
+  const comma = dataUrl.indexOf(',');
+  if (comma === -1) return '';
+
+  const meta = dataUrl.slice(0, comma).toLowerCase();
+  const payload = dataUrl.slice(comma + 1);
+  if (meta.includes(';base64')) {
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+  return decodeURIComponent(payload);
+}
+
 // ── Minimal dependency-free ZIP creator ──────────────────
 // Stored entries only (no compression). Sufficient for our PNG/JPG payloads
 // which are already compressed; keeps the bundle ~tiny.

@@ -3,8 +3,14 @@ import type { JSX } from 'preact';
 import type { Action, State } from '../state';
 import type { ExportMode, ImageFormat } from '../../shared/types';
 import { type ImageAsset, collectImageAssets, sanitizeFileName } from '../prompt';
-import { mergedExt, perImageExt, useDebouncedCallback, useFeedback } from '../utils';
-import { createZip, dataUrlToBlob, downloadBlob } from '../download';
+import {
+  copyToClipboard,
+  mergedExt,
+  perImageExt,
+  useDebouncedCallback,
+  useFeedback,
+} from '../utils';
+import { createZip, dataUrlToBlob, dataUrlToText, downloadBlob } from '../download';
 import { transcodeDataUrl } from '../transcode';
 import {
   type FsaDirectoryHandle,
@@ -195,12 +201,23 @@ interface NameRowProps {
   /** Inline thumbnail — when present, replaces the text label as the primary
    *  identifier so users can tell at a glance which image they're renaming. */
   thumbUrl?: string;
+  svgCopySource?: SvgCopySource;
+  showSvgCopy?: boolean;
   onCommit: (value: string) => void;
 }
 
 /** Uncontrolled input — keystrokes only fire the debounced commit, so the
  *  reducer (which rebuilds the whole prompt) doesn't run per keystroke. */
-function NameRow({ label, placeholder, initialValue, ext, thumbUrl, onCommit }: NameRowProps) {
+function NameRow({
+  label,
+  placeholder,
+  initialValue,
+  ext,
+  thumbUrl,
+  svgCopySource,
+  showSvgCopy,
+  onCommit,
+}: NameRowProps) {
   const debouncedCommit = useDebouncedCallback(onCommit, NAME_DEBOUNCE_MS);
 
   function handleInput(e: JSX.TargetedEvent<HTMLInputElement>) {
@@ -244,6 +261,7 @@ function NameRow({ label, placeholder, initialValue, ext, thumbUrl, onCommit }: 
         </button>
       </span>
       <span class="name-ext">.{ext}</span>
+      {showSvgCopy && <CopySvgIconButton source={svgCopySource} />}
     </div>
   );
 }
@@ -266,17 +284,26 @@ function RenamesList({ state, assets, dispatch }: { state: State; assets: ImageA
 
   return (
     <>
-      {assets.map((a) => (
-        <NameRow
-          key={a.nodeId}
-          label={a.nodeName}
-          placeholder={a.fileName.replace(/\.png$/, '')}
-          initialValue={state.nameOverrides[a.nodeId] ?? ''}
-          ext={perImageExt(state.scale, state.format)}
-          thumbUrl={state.images[a.nodeId]}
-          onCommit={(v) => dispatch({ type: 'NAME_OVERRIDE_CHANGED', id: a.nodeId, value: v })}
-        />
-      ))}
+      {assets.map((a) => {
+        const source = state.rawImages[a.nodeId] ?? state.images[a.nodeId];
+        const base = state.nameOverrides[a.nodeId] ?? a.fileName.replace(/\.png$/, '');
+        const svgCopySource = state.format === 'SVG' && source && isSvgDataUrl(source)
+          ? { name: `${base}.svg`, dataUrl: source }
+          : undefined;
+        return (
+          <NameRow
+            key={a.nodeId}
+            label={a.nodeName}
+            placeholder={a.fileName.replace(/\.png$/, '')}
+            initialValue={state.nameOverrides[a.nodeId] ?? ''}
+            ext={perImageExt(state.scale, state.format)}
+            thumbUrl={state.images[a.nodeId]}
+            svgCopySource={svgCopySource}
+            showSvgCopy={state.format === 'SVG'}
+            onCommit={(v) => dispatch({ type: 'NAME_OVERRIDE_CHANGED', id: a.nodeId, value: v })}
+          />
+        );
+      })}
     </>
   );
 }
@@ -312,6 +339,177 @@ function FolderPickerRow({ dir, onPick }: FolderPickerRowProps) {
         </button>
       )}
     </div>
+  );
+}
+
+// ── Copy SVG ────────────────────────────────────────────
+interface SvgCopySource {
+  name: string;
+  dataUrl: string;
+}
+
+function dataUrlMime(dataUrl: string): string {
+  return /^data:([^;,]+)/.exec(dataUrl)?.[1] ?? '';
+}
+
+function isSvgDataUrl(dataUrl: string): boolean {
+  return dataUrlMime(dataUrl).toLowerCase() === 'image/svg+xml';
+}
+
+function collectSvgCopySources(state: State): SvgCopySource[] {
+  if (!state.data || state.format !== 'SVG') return [];
+
+  if (state.mode === 'merged') {
+    const source = state.rawMerged ?? state.mergedImage;
+    if (!source || !isSvgDataUrl(source)) return [];
+    const base = state.mergedImageName.trim() || sanitizeFileName(state.data.name);
+    return [{ name: `${base}.svg`, dataUrl: source }];
+  }
+
+  return collectImageAssets(state.data, state.nameOverrides)
+    .map((asset) => {
+      const source = state.rawImages[asset.nodeId] ?? state.images[asset.nodeId];
+      return source && isSvgDataUrl(source)
+        ? {
+            name: asset.fileName.replace(/\.png$/, '.svg'),
+            dataUrl: source,
+          }
+        : null;
+    })
+    .filter((source): source is SvgCopySource => source !== null);
+}
+
+type SvgCopyFeedback = 'copied' | 'failed';
+
+async function copySvgSources(sources: SvgCopySource[]): Promise<boolean> {
+  if (sources.length === 0) return false;
+
+  try {
+    const svgText = sources
+      .map((source) => dataUrlToText(source.dataUrl))
+      .map((text) => text.trim())
+      .filter(Boolean)
+      .join('\n\n');
+    return svgText.length > 0 && (await copyToClipboard(svgText));
+  } catch {
+    return false;
+  }
+}
+
+function SvgCopyStatusIcon({ status }: { status: SvgCopyFeedback | 'idle' }) {
+  if (status === 'copied') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M3.5 8.2 6.4 11 12.5 4.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    );
+  }
+
+  if (status === 'failed') {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M8 3.5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        <path d="M8 12.5h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="5" y="3" width="8" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5" />
+      <path d="M3 5.5v6A1.5 1.5 0 0 0 4.5 13H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function CopySvgIconButton({ source }: { source?: SvgCopySource }) {
+  const [feedback, flash] = useFeedback<SvgCopyFeedback>();
+  const [copying, setCopying] = useState(false);
+  const disabled = !source || copying;
+
+  async function handleClick() {
+    if (!source || copying) return;
+    setCopying(true);
+    try {
+      flash((await copySvgSources([source])) ? 'copied' : 'failed');
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  const label = copying
+    ? 'Copying SVG'
+    : feedback === 'copied'
+      ? 'Copied SVG'
+      : feedback === 'failed'
+        ? 'Copy SVG failed'
+        : 'Copy SVG';
+  const cls = `name-copy${copying ? ' saving' : feedback === 'copied' ? ' copied' : feedback === 'failed' ? ' copy-failed' : ''}`;
+
+  return (
+    <button
+      type="button"
+      class={cls}
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={handleClick}
+    >
+      {copying ? <span class="btn-spinner" aria-hidden="true" /> : <SvgCopyStatusIcon status={feedback ?? 'idle'} />}
+    </button>
+  );
+}
+
+function CopySvgButton({ state }: { state: State }) {
+  const [feedback, flash] = useFeedback<SvgCopyFeedback>();
+  const [copying, setCopying] = useState(false);
+  const sources = useMemo(() => collectSvgCopySources(state), [
+    state.data,
+    state.format,
+    state.images,
+    state.mergedImage,
+    state.mergedImageName,
+    state.mode,
+    state.nameOverrides,
+    state.rawImages,
+    state.rawMerged,
+  ]);
+  const loadedCount = sources.length;
+  const disabled = loadedCount === 0 || copying;
+
+  async function handleClick() {
+    if (disabled) return;
+
+    setCopying(true);
+
+    try {
+      flash((await copySvgSources(sources)) ? 'copied' : 'failed');
+    } finally {
+      setCopying(false);
+    }
+  }
+
+  const baseLabel = loadedCount > 1 ? 'Copy SVGs' : 'Copy SVG';
+  const label = copying
+    ? 'Copying…'
+    : feedback === 'copied'
+      ? 'Copied!'
+      : feedback === 'failed'
+        ? 'Copy failed'
+        : baseLabel;
+  const cls = copying
+    ? 'btn-candy btn-candy-sm saving'
+    : feedback === 'copied'
+      ? 'btn-candy btn-candy-sm copied'
+      : feedback === 'failed'
+        ? 'btn-candy btn-candy-sm copy-failed'
+        : 'btn-candy btn-candy-sm';
+
+  return (
+    <button class={cls} disabled={disabled} onClick={handleClick}>
+      {copying && <span class="btn-spinner" aria-hidden="true" />}
+      {label}
+    </button>
   );
 }
 
@@ -532,7 +730,14 @@ export function ExportCard({ state, dispatch }: Props) {
 
       {fsaSupported && <FolderPickerRow dir={dirHandle} onPick={handlePickDirectory} />}
 
-      <DownloadButton state={state} dirHandle={dirHandle} fsaSupported={fsaSupported} />
+      {state.format === 'SVG' ? (
+        <div class="export-actions">
+          <CopySvgButton state={state} />
+          <DownloadButton state={state} dirHandle={dirHandle} fsaSupported={fsaSupported} />
+        </div>
+      ) : (
+        <DownloadButton state={state} dirHandle={dirHandle} fsaSupported={fsaSupported} />
+      )}
     </section>
   );
 }

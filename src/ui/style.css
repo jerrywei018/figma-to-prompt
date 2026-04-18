@@ -285,6 +285,17 @@ body {
   box-shadow: 3px 3px 0 var(--border);
 }
 
+.export-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.export-actions .btn-candy {
+  min-width: 0;
+  padding-inline: 10px;
+}
+
 .option-stack {
   display: flex;
   flex-direction: column;
@@ -738,6 +749,56 @@ body {
   flex-shrink: 0;
 }
 
+.name-copy {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-fg);
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms var(--bounce);
+}
+
+.name-copy:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--fg);
+  transform: translateY(-1px);
+}
+
+.name-copy:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.name-copy.copied {
+  color: var(--accent-fg);
+  background: var(--quaternary);
+  border-color: var(--fg);
+}
+
+.name-copy.copy-failed {
+  color: var(--accent-fg);
+  background: #EF4444;
+  border-color: var(--fg);
+}
+
+.name-copy.saving {
+  color: var(--accent-fg);
+  background: var(--tertiary);
+  border-color: var(--fg);
+}
+
+.name-copy .btn-spinner {
+  width: 8px;
+  height: 8px;
+}
+
 /* ── Status Bar ───────────────────────────────────────── */
 .status-bar {
   display: flex;
@@ -833,6 +894,7 @@ body {
 /* ── Focus Rings (Keyboard Accessibility) ─────────────── */
 .tab-btn:focus-visible,
 .btn-candy:focus-visible,
+.name-copy:focus-visible,
 .segment:focus-visible,
 .chip:focus-visible {
   outline: 2px solid var(--accent);

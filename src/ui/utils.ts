@@ -6,6 +6,8 @@ import type { ImageFormat } from '../shared/types';
  * sometimes blocks `navigator.clipboard.writeText`; this works in those contexts.
  */
 function execCopy(text: string): boolean {
+  if (typeof document === 'undefined') return false;
+
   const textarea = document.createElement('textarea');
   textarea.value = text;
   textarea.style.position = 'fixed';
@@ -23,9 +25,10 @@ function execCopy(text: string): boolean {
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  if (clipboard?.writeText) {
     try {
-      await navigator.clipboard.writeText(text);
+      await clipboard.writeText(text);
       return true;
     } catch {
       return execCopy(text);
